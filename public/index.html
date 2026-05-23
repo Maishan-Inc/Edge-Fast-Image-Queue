@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Edge-Fast-Image-Queue</title>
+    <link rel="stylesheet" href="/assets/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero card">
+        <div>
+          <p class="eyebrow">Cloudflare Edge · Durable Queue · GPT Image</p>
+          <h1>Edge-Fast-Image-Queue</h1>
+          <p class="lead">一个运行在边缘节点上的图片生成排队系统。Linux.DO 用户优先于 Google 用户，前 50 名进入保护区后严格按顺序执行。</p>
+          <div class="actions">
+            <a class="button ghost" href="/api/auth/linuxdo/start">Linux.DO 登录</a>
+            <a class="button ghost" href="/api/auth/google/start">Google 登录</a>
+            <a class="button ghost" href="/admin.html">后台</a>
+          </div>
+        </div>
+        <div class="status-panel">
+          <span class="badge running">EDGE READY</span>
+          <div class="metric"><b id="waitingCount">--</b><span>等待中</span></div>
+          <div class="metric"><b id="runningCount">--</b><span>执行中</span></div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <form id="generateForm" class="card form-card">
+          <label for="prompt">图片描述</label>
+          <textarea id="prompt" name="prompt" rows="7" placeholder="例如：一只穿赛博朋克夹克的橘猫，站在东京雨夜霓虹街头，电影感，超清细节"></textarea>
+          <div class="form-row">
+            <select id="size" name="size">
+              <option value="1024x1024">1024×1024</option>
+              <option value="1024x1536">1024×1536</option>
+              <option value="1536x1024">1536×1024</option>
+            </select>
+            <select id="quality" name="quality">
+              <option value="auto">auto</option>
+              <option value="high">high</option>
+              <option value="medium">medium</option>
+            </select>
+          </div>
+          <button class="button primary" type="submit">提交生成请求</button>
+          <p class="hint">未登录用户默认不可生成。后台可开启游客模式，但不推荐。</p>
+        </form>
+
+        <section class="card queue-card">
+          <h2>我的队列</h2>
+          <div id="jobStatus" class="empty">还没有任务。</div>
+          <p class="hint">如果你被更高优先级用户延期，这里会显示新的排名。</p>
+        </section>
+      </section>
+    </main>
+    <script src="/assets/app.js" type="module"></script>
+  </body>
+</html>
