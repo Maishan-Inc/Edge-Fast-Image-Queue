@@ -9,6 +9,8 @@ const runningCount = document.querySelector('#runningCount');
 
 let currentJobId = localStorage.getItem('efi_current_job_id');
 let pollTimer = null;
+let captchaConfig = { enabled: false, provider: 'none', siteKey: '' };
+let captchaWidgetId = null;
 
 async function api(path, options) {
   const res = await fetch(path, {
@@ -29,16 +31,75 @@ function getDeviceId() {
   return id;
 }
 
+async function initCaptcha() {
+  try {
+    const config = await api('/api/config/public');
+    const enabled = config.CAPTCHA_ENABLED === 'true';
+    const provider = (config.CAPTCHA_PROVIDER || 'none').toLowerCase();
+    const siteKey = config.CAPTCHA_SITE_KEY || '';
+    if (!enabled || provider === 'none' || !siteKey) return;
+    captchaConfig = { enabled: true, provider, siteKey };
+
+    const container = document.querySelector('#captchaWidget');
+    if (!container) return;
+
+    if (provider === 'turnstile') {
+      const script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onCaptchaLoad&render=explicit';
+      script.async = true;
+      document.head.appendChild(script);
+      window.onCaptchaLoad = () => {
+        captchaWidgetId = window.turnstile.render(container, { sitekey: siteKey, theme: 'light' });
+      };
+    } else if (provider === 'hcaptcha') {
+      const script = document.createElement('script');
+      script.src = 'https://js.hcaptcha.com/1/api.js?onload=onCaptchaLoad&render=explicit';
+      script.async = true;
+      document.head.appendChild(script);
+      window.onCaptchaLoad = () => {
+        captchaWidgetId = window.hcaptcha.render(container, { sitekey: siteKey, theme: 'light' });
+      };
+    }
+  } catch { /* captcha optional */ }
+}
+
+function getCaptchaToken() {
+  if (!captchaConfig.enabled) return undefined;
+  if (captchaConfig.provider === 'turnstile' && window.turnstile) {
+    return window.turnstile.getResponse(captchaWidgetId) || undefined;
+  }
+  if (captchaConfig.provider === 'hcaptcha' && window.hcaptcha) {
+    return window.hcaptcha.getResponse(captchaWidgetId) || undefined;
+  }
+  return undefined;
+}
+
+function resetCaptcha() {
+  if (!captchaConfig.enabled) return;
+  if (captchaConfig.provider === 'turnstile' && window.turnstile) {
+    window.turnstile.reset(captchaWidgetId);
+  } else if (captchaConfig.provider === 'hcaptcha' && window.hcaptcha) {
+    window.hcaptcha.reset(captchaWidgetId);
+  }
+}
+
 form?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const prompt = form.querySelector('#prompt').value.trim();
   if (!prompt) return;
+
+  const captchaToken = getCaptchaToken();
+  if (captchaConfig.enabled && !captchaToken) {
+    showResult('error', { message: '请完成人机验证。' });
+    return;
+  }
 
   const payload = {
     prompt,
     size: form.querySelector('#size').value,
     quality: form.querySelector('#quality').value,
     anonymousDeviceId: getDeviceId(),
+    captchaToken,
   };
 
   setResult('submitting');
@@ -50,6 +111,8 @@ form?.addEventListener('submit', async (e) => {
     startPolling();
   } catch (err) {
     showResult('error', { message: err.message });
+  } finally {
+    resetCaptcha();
   }
 });
 
@@ -180,6 +243,7 @@ function escapeHtml(str) {
 
 refreshOverview();
 setInterval(refreshOverview, 5000);
+initCaptcha();
 
 if (currentJobId) {
   startPolling();

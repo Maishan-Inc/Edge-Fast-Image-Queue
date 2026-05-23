@@ -5,6 +5,7 @@ import { newId, now, sha256Hex } from '../utils/ids';
 import { getSetting, toBool, toInt } from '../services/config';
 import { providerPriority } from '../services/oauth';
 import { checkAndIncrementLimit } from '../services/rateLimit';
+import { verifyCaptcha } from '../services/captcha';
 
 export const generateRoutes = new Hono<AppContext>();
 
@@ -13,7 +14,7 @@ generateRoutes.post('/', async (c) => {
     prompt?: string;
     size?: string;
     quality?: string;
-    turnstileToken?: string;
+    captchaToken?: string;
     anonymousDeviceId?: string;
   };
 
@@ -24,6 +25,9 @@ generateRoutes.post('/', async (c) => {
   const user = c.get('user');
   const allowGuest = toBool(await getSetting(c.env, 'QUEUE_ALLOW_GUEST', c.env.QUEUE_ALLOW_GUEST ?? 'false'));
   if (!user && !allowGuest) return fail(c, 'LOGIN_REQUIRED', '请先使用 Google 或 Linux.DO 登录后再生成图片。', 401);
+
+  const captchaResult = await verifyCaptcha(c.env, body?.captchaToken, c.req.header('CF-Connecting-IP'));
+  if (!captchaResult.ok) return fail(c, 'CAPTCHA_FAILED', '人机验证失败，请重试。', 403);
 
   const windowSeconds = toInt(await getSetting(c.env, 'QUEUE_GROUP_WINDOW_SECONDS', c.env.QUEUE_GROUP_WINDOW_SECONDS ?? '60'), 60);
   const maxRequests = toInt(await getSetting(c.env, 'QUEUE_GROUP_MAX_REQUESTS', c.env.QUEUE_GROUP_MAX_REQUESTS ?? '1'), 1);
