@@ -1,4 +1,4 @@
-name: Build and Push Docker Images
+name: Build and Push Docker Image
 
 on:
   push:
@@ -8,21 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      IMAGE_REPOSITORY: maishanhub/edge-fast-image-queue
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - service: api
-            dockerfile: Dockerfile.api
-          - service: worker
-            dockerfile: Dockerfile.worker
-          - service: admin
-            dockerfile: Dockerfile.admin
-          - service: web
-            dockerfile: Dockerfile.web
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -40,17 +25,21 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_REPOSITORY }}
+          images: maishanhub/edge-fast-image-queue
           tags: |
-            type=raw,value=${{ matrix.service }}-main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=${{ matrix.service }}-{{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=${{ matrix.service }}-{{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,prefix=
 
-      - name: Build and push ${{ matrix.service }} image
-        uses: docker/build-push-action@v5
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

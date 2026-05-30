@@ -1,6 +1,6 @@
 services:
   app:
-    image: ghcr.io/basketikun/aivro:latest
+    image: maishanhub/edge-fast-image-queue:main
     container_name: aivro
     env_file:
       - .env
