@@ -1,101 +1,81 @@
-<p align="center">
-  <img src="web/public/logo.svg" width="96" alt="Aivro logo">
-</p>
+# Aivro
 
-<h1 align="center">边缘幻星 Aivro</h1>
+Aivro 是一个面向 AI 图片、视频和提示词工作流的创作系统。项目提供用户侧工作流画布、图片生成、视频生成、提示词库、素材管理、生成记录，以及管理后台的模型渠道、用户、认证、邮件和系统配置能力。
 
-边缘幻星 (Aivro) 是一款面向图片创作的开源工作台。它把画布编排、AI 图片生成、参考图编辑、对话助手、提示词库和素材沉淀放在同一个界面里，适合用来探索视觉方案并连续迭代图片结果。
+项目仍处于开发阶段，数据库结构和本地存储格式可能直接调整，不承诺旧数据兼容。当前更适合个人部署、内网部署和二次开发验证。
 
-> [!CAUTION]
-> 项目目前处于开发阶段，不保证历史数据兼容。各种数据库结构和存储格式都可能直接调整，欢迎关注后续更新，当前更适合个人/本地部署，不建议直接公网多人共用。
->
-> 如果你需要稳定维护自己的分支，建议自行 fork 后独立开发。二次开发与 PR 请保留原作者信息和前端页面标识。
+## 基于什么开发
+
+Aivro 基于以下技术开发：
+
+- 前端：Next.js App Router、React、TypeScript、Ant Design、Tailwind CSS、Zustand、TanStack Query。
+- 后端：Go、Gin、GORM。
+- 数据库：PostgreSQL，后端结构预留 MySQL 兼容。
+- AI 接口：OpenAI 兼容 API，支持配置多个模型渠道。
+- 存储：浏览器本地存储、本地数据目录，云存储能力支持 Cloudflare R2 / S3。
+- 部署：Docker、Docker Compose。
 
 ## 核心功能
 
-- 无限画布：多画布项目、节点拖拽缩放、连线、小地图、撤销重做、导入导出。
-- AI 创作：支持 OpenAI 兼容接口的文生图、图生图、参考图编辑和文本问答。
-- 画布助手：围绕选中节点和上游节点对话、生图，并把结果插回画布。
-- 提示词库：抓取多个 GitHub 开源项目，按案例整理数百个图片提示词。
-
-完整功能说明见 [docs/features.md](docs/features.md)。
-
-如果你在为担心没有合适的生图API来发愁，可以查看该免费生图项目：[chatgpt2api](https://github.com/basketikun/chatgpt2api)
-
-## 技术栈
-
-- 前端：Next.js、React、TypeScript、Tailwind CSS、Ant Design、Zustand、TanStack Query。
-- 后端：Go、Gin、GORM。
-- 部署：Docker。
+- 工作流画布：多画布项目、节点拖拽缩放、连线、小地图、撤销重做、导入导出。
+- AI 图片创作：文生图、图生图、参考图编辑、生成记录和素材保存。
+- AI 视频创作：提示词、参考图、视频参数、生成结果和本地记录。
+- 提示词库：提示词分类、标签、预览、收藏和复用。
+- 素材库：图片、视频、文本素材的本地保存、导入和导出。
+- 管理后台：用户管理、模型渠道、模型算力点、公开配置、私有配置、邮件配置、第三方登录、数据库更新。
+- 认证能力：账号密码、邮箱验证码、找回密码、Google、GitHub、Linux.do、自定义 OAuth、MetaMask。
+- 云存储：开启后可将生成图片和视频转存到 Cloudflare R2 或兼容 S3。
 
 ## 快速开始
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/basketikun/aivro)
+复制环境变量文件：
 
 ```bash
-git clone git@github.com:basketikun/aivro.git
-cd aivro
 cp .env.example .env
-# 修改默认账号密码等信息
-docker-compose up -d
 ```
 
-本地源码构建运行：
+使用 Docker Compose 启动：
 
 ```bash
-cp .env.example .env
+docker compose up -d
+```
+
+本地源码镜像构建启动：
+
+```bash
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
-运行后默认端口3000，可访问 `http://localhost:3000`。
+默认访问地址：
 
-如需要拉取提示词，可前往:`http://localhost:3000/admin/prompts`
+```text
+http://localhost:3982
+```
 
-## 效果展示
+PostgreSQL 默认只在 Docker 内部网络中提供给应用容器访问，不会映射到宿主机端口。
 
-<table width="100%">
-  <tr>
-    <td width="50%"><img src="https://i.ibb.co/TDFvGWDT/image.png" alt="image" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/zVwJq3YS/image.png" alt="image" border="0"></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="https://i.ibb.co/PvY3qhhK/image.png" alt="image" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/7D04LwN/image.png" alt="image" border="0"></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="https://i.ibb.co/bj30FtS5/5.png" alt="5" border="0"></td>
-    <td width="50%"><img src="https://i.ibb.co/hxRvjw51/image.png" alt="image" border="0"></td>
-  </tr>
-</table>
+## 常用入口
+
+- 用户首页：`/`
+- 工作流画布：`/canvas`
+- 图片创作台：`/image`
+- 视频创作台：`/video`
+- 提示词库：`/prompts`
+- 素材库：`/assets`
+- 管理后台：`/admin`
 
 ## 文档
 
-- [功能介绍](docs/features.md)
+- [功能说明](docs/features.md)
 - [部署说明](docs/deployment.md)
 - [画布节点操作手册](docs/canvas-node-manual.md)
 - [画布快捷键](docs/canvas-shortcuts.md)
-- [待办事项](docs/todo.md)
 - [后端数据库说明](docs/backend-database.md)
 - [系统配置数据结构](docs/system-settings.md)
 - [接口响应约定](docs/api-response.md)
-
-## 社区支持
-
-学 AI，上 L 站：[LinuxDO](https://linux.do/)
-
-点击链接加入群聊【AI开源交流】：https://qm.qq.com/q/DFnKzZ807u
+- [待办事项](docs/todo.md)
+- [待测试事项](docs/pending-test.md)
 
 ## 开源协议
 
 本项目使用 GNU Affero General Public License v3.0，见 [LICENSE](LICENSE)。
-
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=basketikun%2Faivro&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=basketikun/aivro&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=basketikun/aivro&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=basketikun/aivro&type=date&legend=top-left" />
- </picture>
-</a>
