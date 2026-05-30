@@ -1,115 +1,164 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { App, Button } from "antd";
-import { Download, FileUp, Plus } from "lucide-react";
+import { App, Button, Modal, Spin, Tag } from "antd";
+import { Plus } from "lucide-react";
 
-import { readZip } from "@/lib/zip";
-import { setMediaBlob } from "@/services/file-storage";
-import { setImageBlob } from "@/services/image-storage";
-import { CanvasDeleteProjectsDialog } from "./components/canvas-delete-projects-dialog";
+import { createWorkflow, deleteWorkflow, fetchWorkflows, updateWorkflow, type CloudWorkflow } from "@/services/api/workflows";
+import { useUserStore } from "@/stores/use-user-store";
 import { CanvasProjectCard } from "./components/canvas-project-card";
-import type { CanvasExportFile } from "./export-types";
 import { useCanvasStore } from "./stores/use-canvas-store";
 import { useCanvasUiStore } from "./stores/use-canvas-ui-store";
-import { exportCanvasProjects } from "./utils/canvas-export";
+
+const creditsMessage = "当前账号暂无工作流创建次数，请完成 KYC 认证或购买套餐获取更多创建次数。";
 
 export default function CanvasPage() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const router = useRouter();
-    const inputRef = useRef<HTMLInputElement>(null);
-    const hydrated = useCanvasStore((state) => state.hydrated);
+    const token = useUserStore((state) => state.token);
+    const user = useUserStore((state) => state.user);
+    const isReady = useUserStore((state) => state.isReady);
+    const hydrateUser = useUserStore((state) => state.hydrateUser);
     const projects = useCanvasStore((state) => state.projects);
-    const createProject = useCanvasStore((state) => state.createProject);
-    const importProject = useCanvasStore((state) => state.importProject);
+    const setProjects = useCanvasStore((state) => state.setProjects);
+    const removeProjects = useCanvasStore((state) => state.removeProjects);
+    const upsertProject = useCanvasStore((state) => state.upsertProject);
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
-    const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
+    const removeSelectedIds = useCanvasUiStore((state) => state.removeSelectedProjectIds);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isCreating, setIsCreating] = useState(false);
 
-    const enterProject = (id: string) => {
-        router.push(`/canvas/${id}`);
+    useEffect(() => {
+        if (!isReady) return;
+        if (!token) {
+            router.replace("/login?redirect=/canvas");
+            return;
+        }
+        setIsLoading(true);
+        fetchWorkflows(token, { pageSize: 200 })
+            .then((data) => setProjects(data.items))
+            .catch((error) => message.error(error instanceof Error ? error.message : "读取工作流失败"))
+            .finally(() => setIsLoading(false));
+    }, [isReady, message, router, setProjects, token]);
+
+    const showCreditsModal = () => {
+        modal.confirm({
+            title: "工作流创建次数不足",
+            content: creditsMessage,
+            okText: "去购买套餐",
+            cancelText: "去完成 KYC 认证",
+            onOk: () => router.push("/pricing"),
+            onCancel: () => router.push("/pricing?kyc=1"),
+        });
     };
-    const createAndEnter = () => enterProject(createProject(`边缘幻星 ${projects.length + 1}`));
-    const importCanvas = async (file?: File) => {
-        if (!file) return;
+
+    const createAndEnter = async () => {
+        if (!token) return;
+        setIsCreating(true);
         try {
-            const zip = await readZip(file);
-            const projectFile = zip.get("projects.json");
-            if (!projectFile) throw new Error("missing projects.json");
-            const data = JSON.parse(await projectFile.text()) as CanvasExportFile;
-            await Promise.all(
-                data.projects.flatMap((project) =>
-                    project.files.map(async (item) => {
-                        const blob = zip.get(item.path);
-                        if (!blob) return;
-                        const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-                        await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
-                    }),
-                ),
-            );
-            data.projects.forEach((item) => importProject(item.project));
-            message.success(`已导入 ${data.projects.length} 个工作流`);
-        } catch {
-            message.error("导入失败，请选择有效的工作流压缩包");
+            const workflow = await createWorkflow(token, {
+                title: `边缘幻星 ${projects.length + 1}`,
+                nodes: [],
+                connections: [],
+                chatSessions: [],
+                activeChatId: null,
+                backgroundMode: "lines",
+                showImageInfo: false,
+                viewport: { x: 0, y: 0, k: 1 },
+            });
+            upsertProject(workflow);
+            await hydrateUser();
+            router.push(`/canvas/${workflow.id}`);
+        } catch (error) {
+            const text = error instanceof Error ? error.message : "创建工作流失败";
+            if (text.includes("暂无工作流创建次数")) showCreditsModal();
+            else message.error(text);
         } finally {
-            if (inputRef.current) inputRef.current.value = "";
+            setIsCreating(false);
         }
     };
+
+    const renameProject = async (project: CloudWorkflow, title: string) => {
+        if (!token) return;
+        try {
+            const saved = await updateWorkflow(token, project.id, { ...project, title });
+            upsertProject(saved);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "重命名失败");
+        }
+    };
+
+    const deleteProjects = (ids: string[]) => {
+        if (!token || !ids.length) return;
+        Modal.confirm({
+            title: "删除工作流？",
+            content: `将删除 ${ids.length} 个云端工作流，删除后不可在列表中继续访问。`,
+            okText: "删除",
+            okButtonProps: { danger: true },
+            cancelText: "取消",
+            onOk: async () => {
+                try {
+                    await Promise.all(ids.map((id) => deleteWorkflow(token, id)));
+                    removeProjects(ids);
+                    removeSelectedIds(ids);
+                    message.success("已删除");
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : "删除失败");
+                }
+            },
+        });
+    };
+
+    if (!isReady || !token) {
+        return <main className="grid h-full place-items-center bg-background" />;
+    }
 
     return (
         <main className="h-full overflow-auto bg-background text-stone-950 dark:text-stone-100">
             <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10">
                 <header className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-6 dark:border-stone-800">
                     <div>
-                        <p className="text-xs text-stone-500">工作流库</p>
+                        <p className="text-xs text-stone-500">云端工作流库</p>
                         <h1 className="mt-3 text-3xl font-semibold">边缘幻星</h1>
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-stone-500">
+                            <Tag color="blue">剩余创建次数 {user?.workflowCreateCredits ?? 0}</Tag>
+                            <span>所有工作流已保存到云端数据库。</span>
+                        </div>
                     </div>
                     <div className="flex items-center gap-2">
                         {selectedIds.length ? (
-                            <>
-                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `边缘幻星-${selectedIds.length}个项目`)}>
-                                    导出选中
-                                </Button>
-                                <Button disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>
-                                    删除选中
-                                </Button>
-                            </>
-                        ) : null}
-                        {projects.length ? (
-                            <Button disabled={!hydrated} onClick={() => setDeleteIds(projects.map((project) => project.id))}>
-                                删除全部
+                            <Button onClick={() => deleteProjects(selectedIds)}>
+                                删除选中
                             </Button>
                         ) : null}
-                        <Button disabled={!hydrated} icon={<FileUp className="size-4" />} onClick={() => inputRef.current?.click()}>
-                            导入工作流
-                        </Button>
-                        <Button disabled={!hydrated} type="primary" icon={<Plus className="size-4" />} onClick={createAndEnter}>
+                        {projects.length ? <Button onClick={() => deleteProjects(projects.map((project) => project.id))}>删除全部</Button> : null}
+                        <Button type="primary" icon={<Plus className="size-4" />} loading={isCreating} onClick={createAndEnter}>
                             新建工作流
                         </Button>
                     </div>
                 </header>
 
-                {!hydrated ? (
-                    <section className="flex min-h-[360px] items-center justify-center border-y border-stone-200 text-sm text-stone-500 dark:border-stone-800">正在加载工作流...</section>
+                {isLoading ? (
+                    <section className="flex min-h-[360px] items-center justify-center border-y border-stone-200 text-sm text-stone-500 dark:border-stone-800">
+                        <Spin />
+                    </section>
                 ) : projects.length ? (
                     <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                         {projects.map((project) => (
-                            <CanvasProjectCard key={project.id} project={project} />
+                            <CanvasProjectCard key={project.id} project={project} onRename={renameProject} onDelete={(id) => deleteProjects([id])} />
                         ))}
                     </div>
                 ) : (
                     <section className="flex min-h-[360px] flex-col items-center justify-center border-y border-stone-200 text-center dark:border-stone-800">
-                        <h2 className="text-xl font-medium">还没有工作流</h2>
-                        <p className="mt-3 text-sm text-stone-500">新建一个工作流后，就可以独立保存节点、连线和外观。</p>
-                        <Button type="primary" className="mt-6" icon={<Plus className="size-4" />} onClick={createAndEnter}>
+                        <h2 className="text-xl font-medium">还没有云端工作流</h2>
+                        <p className="mt-3 text-sm text-stone-500">新建工作流会消耗 1 次创建次数，并保存到你的账号。</p>
+                        <Button type="primary" className="mt-6" icon={<Plus className="size-4" />} loading={isCreating} onClick={createAndEnter}>
                             新建工作流
                         </Button>
                     </section>
                 )}
             </div>
-
-            <input ref={inputRef} type="file" accept="application/zip,.zip" className="hidden" onChange={(event) => void importCanvas(event.target.files?.[0])} />
-            <CanvasDeleteProjectsDialog />
         </main>
     );
 }

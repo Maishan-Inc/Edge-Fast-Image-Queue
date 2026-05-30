@@ -3,7 +3,7 @@
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 
-export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number };
+export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; cloudFileId?: string; expiresAt?: string };
 
 const store = localforage.createInstance({ name: "aivro", storeName: "media_files" });
 const objectUrls = new Map<string, string>();

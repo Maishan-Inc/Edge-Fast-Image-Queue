@@ -42,9 +42,46 @@ func New() *gin.Engine {
 	v1.GET("/videos/:id/content", func(c *gin.Context) {
 		handler.AIVideoContent(c.Writer, c.Request, c.Param("id"))
 	})
+	v1.GET("/generation-histories", gin.WrapF(handler.GenerationHistories))
+	v1.POST("/generation-histories", gin.WrapF(handler.SaveGenerationHistory))
+	v1.DELETE("/generation-histories/:id", func(c *gin.Context) {
+		handler.DeleteGenerationHistory(c.Writer, c.Request, c.Param("id"))
+	})
+	v1.GET("/workflows", gin.WrapF(handler.Workflows))
+	v1.POST("/workflows", gin.WrapF(handler.CreateWorkflow))
+	v1.GET("/workflows/:id", func(c *gin.Context) {
+		handler.Workflow(c.Writer, c.Request, c.Param("id"))
+	})
+	v1.PUT("/workflows/:id", func(c *gin.Context) {
+		handler.UpdateWorkflow(c.Writer, c.Request, c.Param("id"))
+	})
+	v1.DELETE("/workflows/:id", func(c *gin.Context) {
+		handler.DeleteWorkflow(c.Writer, c.Request, c.Param("id"))
+	})
+	v1.POST("/workflows/:id/share", func(c *gin.Context) {
+		handler.ShareWorkflow(c.Writer, c.Request, c.Param("id"))
+	})
+	v1.GET("/workflow-shares/:token", func(c *gin.Context) {
+		handler.WorkflowShare(c.Writer, c.Request, c.Param("token"))
+	})
+	v1.POST("/workflow-shares/:token/verify", func(c *gin.Context) {
+		handler.VerifyWorkflowShare(c.Writer, c.Request, c.Param("token"))
+	})
+	v1.POST("/workflow-shares/:token/copy", func(c *gin.Context) {
+		handler.CopyWorkflowShare(c.Writer, c.Request, c.Param("token"))
+	})
+	v1.POST("/workflow-shares/:token/revoke", func(c *gin.Context) {
+		handler.RevokeWorkflowShare(c.Writer, c.Request, c.Param("token"))
+	})
+	v1.GET("/plans", gin.WrapF(handler.Plans))
+	v1.POST("/checkout/stripe", gin.WrapF(handler.StripeCheckout))
+	v1.POST("/kyc/session", gin.WrapF(handler.KYCSession))
+	v1.GET("/kyc/status", gin.WrapF(handler.KYCStatus))
 	api.GET("/prompts", middleware.OptionalAuth, gin.WrapF(handler.Prompts))
 	api.GET("/assets", middleware.OptionalAuth, gin.WrapF(handler.Assets))
 	api.POST("/admin/login", gin.WrapF(handler.AdminLogin))
+	api.POST("/webhooks/stripe", gin.WrapF(handler.StripeWebhook))
+	api.POST("/webhooks/didit", gin.WrapF(handler.DiditWebhook))
 
 	admin := api.Group("/admin", middleware.AdminAuth)
 	admin.GET("/users", gin.WrapF(handler.AdminUsers))
@@ -69,6 +106,9 @@ func New() *gin.Engine {
 	admin.POST("/settings/channel-test", gin.WrapF(handler.AdminTestChannelModel))
 	admin.POST("/settings/mail-test", gin.WrapF(handler.AdminTestMail))
 	admin.POST("/settings/cloud-storage-test", gin.WrapF(handler.AdminTestCloudStorage))
+	admin.GET("/plans", gin.WrapF(handler.AdminPlans))
+	admin.POST("/plans", gin.WrapF(handler.AdminSavePlan))
+	admin.PUT("/plans/:id", gin.WrapF(handler.AdminSavePlan))
 	admin.GET("/prompt-categories", gin.WrapF(handler.AdminPromptCategories))
 	admin.POST("/prompt-categories/sync", gin.WrapF(handler.AdminSyncPromptCategories))
 	admin.GET("/prompts", gin.WrapF(handler.AdminPrompts))

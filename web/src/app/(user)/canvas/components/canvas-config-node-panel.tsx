@@ -32,12 +32,11 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, inputs, o
     const [editingText, setEditingText] = useState("");
     const globalConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = node.metadata?.generationMode || "image";
     const config = buildNodeConfig(globalConfig, node, mode);
     const count = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(node.metadata?.count || 3)) || 1)));
-    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: config.model, count: mode === "image" ? count : 1 });
+    const credits = requestCreditCost({ modelCosts, model: config.model, count: mode === "image" ? count : 1 });
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const textInputs = inputs.filter((input) => input.type === "text");
     const imageInputs = inputs.filter((input) => input.type === "image");
@@ -119,7 +118,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, inputs, o
             </div>
 
             <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${mode === "text" ? "grid-cols-1" : "grid-cols-[minmax(0,1fr)_148px]"}`} onMouseDown={(event) => event.stopPropagation()}>
-                <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} onMissingConfig={() => openConfigDialog(true)} fullWidth />
+                <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} onMissingConfig={() => message.warning("管理员尚未配置可用模型")} fullWidth />
                 {mode === "video" ? (
                     <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "videoSeconds" ? { seconds: value } : { [key]: value })} />
                 ) : mode === "image" ? (

@@ -21,6 +21,14 @@
 - `assets`
 - `settings`
 - `cloud_files`
+- `generation_histories`
+- `workflows`
+- `workflow_shares`
+- `workflow_share_copies`
+- `plans`
+- `plan_orders`
+- `entitlement_logs`
+- `kyc_verifications`
 - `database_update_logs`
 
 后续新增表时再同步补充本文档，未实际使用的规划表不提前写入。
@@ -39,6 +47,7 @@
 | `avatar_url`    | string | 头像地址                     |
 | `role`          | string | 角色：`user`、`admin`        |
 | `credits`       | number | 算力点余额                    |
+| `workflow_create_credits` | number | 工作流创建次数余额，新注册用户默认 0 |
 | `aff_code`      | string | 用户自己的邀请码，唯一索引            |
 | `aff_count`     | number | 已邀请用户数量，冗余统计字段           |
 | `inviter_id`    | string | 邀请人用户 ID                 |
@@ -154,7 +163,6 @@
 | `defaultVideoModel` | string | 默认视频模型         |
 | `defaultTextModel` | string  | 默认文本模型         |
 | `systemPrompt`    | string   | 系统提示词          |
-| `allowCustomChannel` | bool    | 是否允许用户自定义渠道，默认允许，关闭后前端只提供走后端渠道的模式 |
 
 `modelCosts` 每项字段：
 
@@ -308,6 +316,165 @@ OAuth 私有配置字段：
 | `updated_at` | string | 更新时间 |
 
 自动清理任务只处理 `expires_at <= now` 且 `deleted_at` 为空的记录；删除云端对象成功后写入 `deleted_at`，删除失败只记录后端日志，不影响其他请求。
+
+### workflows
+
+云端工作流表。工作流列表、详情、保存和删除均通过后端接口读取，不再以浏览器本地 IndexedDB / localForage 作为长期数据源。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `user_id` | string | 所属用户 ID，所有查询、更新、删除都必须带该条件 |
+| `title` | string | 工作流名称 |
+| `nodes` | json | 节点数据 |
+| `connections` | json | 连线数据 |
+| `chat_sessions` | json | 助手会话数据 |
+| `active_chat_id` | string | 当前会话 ID |
+| `background_mode` | string | 画布背景模式 |
+| `show_image_info` | bool | 是否显示图片信息 |
+| `viewport` | json | 画布视口 |
+| `source_share_id` | string | 来源分享 ID，可为空 |
+| `source_workflow_id` | string | 来源主工作流 ID，可为空 |
+| `source_sync_mode` | string | `none`、`detached`、`linked` |
+| `source_version` | number | 已同步到的分享版本 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+| `deleted_at` | string | 软删除时间，未删除为空 |
+
+创建普通工作流和复制分享工作流都会在事务中扣减 `users.workflow_create_credits` 1 次，并写入 `entitlement_logs`。
+
+### workflow_shares
+
+工作流分享快照表。分享 token 为后端生成的不可猜测随机字符串；分享密码只保存哈希。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `owner_id` | string | 分享所有者用户 ID |
+| `source_workflow_id` | string | 原工作流 ID |
+| `token` | string | 分享链接 token，唯一索引 |
+| `title` | string | 分享标题 |
+| `snapshot` | json | 分享时的工作流快照 |
+| `version` | number | 分享版本，从 1 开始，每次更新分享递增 |
+| `password_enabled` | bool | 是否需要密码 |
+| `password_hash` | string | 分享密码哈希 |
+| `status` | string | `active`、`revoked` |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+同一工作流再次分享时更新当前 active 分享快照并递增版本，不生成新链接。
+
+### workflow_share_copies
+
+分享复制关系表。用于记录复制者的云端工作流和同步模式。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `share_id` | string | 分享 ID |
+| `source_workflow_id` | string | 原工作流 ID |
+| `source_owner_id` | string | 原作者用户 ID |
+| `user_id` | string | 复制者用户 ID |
+| `workflow_id` | string | 复制后生成的工作流 ID |
+| `mode` | string | `detached`、`linked` |
+| `source_version` | number | 复制或同步到的分享版本 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+原作者更新分享时，只会查找 `share_id` 相同且 `mode=linked` 的记录，并按 `workflow_id + user_id` 精确更新复制者工作流。
+
+### plans
+
+套餐表。启动迁移时会初始化 GO、Plus、Pro、Max 四个默认套餐，管理员可在后台编辑。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `code` | string | `go`、`plus`、`pro`、`max` |
+| `name` | string | 套餐名称 |
+| `description` | text | 描述 |
+| `price_cents` | number | 价格，单位为分 |
+| `currency` | string | 币种，默认 USD |
+| `credits` | number | 购买后发放的算力点 |
+| `workflow_create_credits` | number | 购买后发放的工作流创建次数 |
+| `enabled` | bool | 是否启用 |
+| `recommended` | bool | 是否推荐 |
+| `sort` | number | 排序 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+### plan_orders
+
+套餐订单表。Stripe Checkout 在后端创建，支付成功以 Stripe webhook 为准。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `user_id` | string | 用户 ID |
+| `plan_id` | string | 套餐 ID |
+| `status` | string | `pending`、`paid`、`failed`、`canceled` |
+| `amount_cents` | number | 订单金额 |
+| `currency` | string | 币种 |
+| `stripe_checkout_session_id` | string | Stripe Checkout Session ID |
+| `stripe_payment_intent_id` | string | Stripe Payment Intent ID |
+| `paid_at` | string | 支付完成时间 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+### entitlement_logs
+
+权益变更流水表。记录套餐购买、KYC 奖励、工作流创建扣减和后台调整等权益变化。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `user_id` | string | 用户 ID |
+| `source` | string | `plan_purchase`、`kyc_reward`、`workflow_create`、`admin_adjust` |
+| `source_id` | string | 关联业务 ID |
+| `credits_delta` | number | 算力点变动 |
+| `workflow_create_credits_delta` | number | 工作流创建次数变动 |
+| `credits_after` | number | 变动后的算力点 |
+| `workflow_create_credits_after` | number | 变动后的工作流创建次数 |
+| `remark` | string | 备注 |
+| `created_at` | string | 创建时间 |
+
+### kyc_verifications
+
+KYC 认证记录表。当前服务商为 Didit。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `user_id` | string | 用户 ID |
+| `provider` | string | 服务商，当前为 `didit` |
+| `provider_session_id` | string | Didit session ID |
+| `status` | string | `pending`、`approved`、`rejected`、`expired` |
+| `rewarded` | bool | 是否已发放奖励 |
+| `raw_payload` | json | Didit 会话或 webhook 原始数据 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+### generation_histories
+
+用户图片、视频生成历史表。历史记录只保存已转存到 `cloud_files` 的图片或视频，展示周期跟随关联云端文件的 `expires_at`；如果关联媒体不存在、已删除或已过期，列表接口会自动移除该历史记录。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `user_id` | string | 用户 ID |
+| `type` | string | 历史类型：`image`、`video` |
+| `title` | string | 标题，默认取提示词前缀或模型名 |
+| `prompt` | text | 本次生成提示词 |
+| `model` | string | 本次使用模型 |
+| `config` | json | 本次生成参数，例如尺寸、质量、张数、秒数、清晰度 |
+| `references` | json | 参考图片记录，保存名称、类型、URL 和 `storageKey` |
+| `media` | json | 生成结果媒体，保存 `cloudFileId`、`storageKey`、URL、类型、大小和过期时间 |
+| `status` | string | 生成状态：`成功`、`失败` |
+| `error` | text | 失败信息，成功时为空 |
+| `duration_ms` | number | 本次生成耗时毫秒数 |
+| `expires_at` | string | 历史到期时间，取关联媒体中最早的 `expires_at` |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
 
 ### credit_logs
 

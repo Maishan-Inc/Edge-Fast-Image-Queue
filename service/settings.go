@@ -34,6 +34,7 @@ func SaveSettings(settings model.Settings) (model.Settings, error) {
 	keepPrivateAPIKeys(&settings, normalizeSettings(saved))
 	keepPrivateAuthSecrets(&settings, normalizeSettings(saved))
 	keepCloudStorageSecrets(&settings, normalizeSettings(saved))
+	keepBillingAndKYCSecrets(&settings, normalizeSettings(saved))
 	result, err := repository.SaveSettings(settings, now())
 	if err == nil {
 		RefreshPromptSyncScheduler()
@@ -100,10 +101,6 @@ func normalizePublicSetting(setting model.PublicSetting) model.PublicSetting {
 			setting.ModelChannel.ModelCosts[i].Credits = 0
 		}
 	}
-	if setting.ModelChannel.AllowCustomChannel == nil {
-		enabled := true
-		setting.ModelChannel.AllowCustomChannel = &enabled
-	}
 	if setting.Auth.AllowRegister == nil {
 		enabled := true
 		setting.Auth.AllowRegister = &enabled
@@ -148,7 +145,7 @@ func defaultPrivacyPolicyContent() string {
 	return strings.TrimSpace(`欢迎使用 Aivro（边缘幻星）。我们重视你的隐私，并尽量只处理提供服务所必需的信息。
 
 一、我们处理的信息
-当你注册、登录或使用 Aivro 时，我们可能会处理用户名、邮箱、第三方登录标识、登录状态、算力点记录、生成请求、提示词、参考图片、生成结果地址以及你主动保存到素材或画布中的内容。当前个人素材、画布项目和生成历史主要保存在你的浏览器本地；如果管理员开启云存储，生成后的图片和视频会由后端转存到配置的 Cloudflare R2 或兼容 S3 存储，并在到期后按配置自动清理。
+当你注册、登录或使用 Aivro 时，我们可能会处理用户名、邮箱、第三方登录标识、登录状态、算力点记录、生成请求、提示词、参考图片、生成结果地址以及你主动保存到素材或画布中的内容。生成历史保存在数据库中，并跟随云存储文件有效期展示；如果管理员开启云存储，生成后的图片和视频会由后端转存到配置的 Cloudflare R2 或兼容 S3 存储，并在到期后按配置自动清理。
 
 二、信息用途
 这些信息用于完成账号登录、身份验证、生成服务、素材和历史记录管理、算力点扣减与返还、系统安全审计、故障排查以及必要的产品体验改进。
@@ -156,8 +153,8 @@ func defaultPrivacyPolicyContent() string {
 三、第三方服务
 Aivro 可能接入 OpenAI 兼容模型渠道、Cloudflare R2 / S3 云存储、邮箱服务和第三方登录服务。你提交的生成内容可能会根据管理员配置发送给相应模型服务商处理。请不要提交你无权处理或不希望第三方服务处理的敏感内容。
 
-四、本地存储
-为提供连续创作体验，Aivro 会在浏览器本地保存用户配置、语言偏好、素材、画布项目和生成历史。你可以通过浏览器设置清理这些本地数据。
+四、本地存储与云端工作流
+Aivro 会在浏览器本地保存语言偏好、界面状态等少量配置；工作流项目保存在云端数据库中。生成模型渠道由管理员统一配置，用户侧不会保存或填写 API Key。你可以通过浏览器设置清理本地偏好数据。
 
 五、你的选择
 你可以停止使用服务、清理浏览器本地数据，或联系站点管理员请求处理账号相关信息。管理员可在后台调整模型渠道、登录方式、邮件和云存储配置。
@@ -210,6 +207,8 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 	setting.Auth = normalizePrivateAuthSetting(setting.Auth)
 	setting.Mail = normalizeMailSetting(setting.Mail)
 	setting.CloudStorage = normalizeCloudStorageSetting(setting.CloudStorage)
+	setting.Stripe = normalizeStripeSetting(setting.Stripe)
+	setting.KYC = normalizeKYCSetting(setting.KYC)
 	for i := range setting.Channels {
 		if setting.Channels[i].Protocol == "" {
 			setting.Channels[i].Protocol = "openai"
@@ -220,6 +219,26 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 		if setting.Channels[i].Weight <= 0 {
 			setting.Channels[i].Weight = 1
 		}
+	}
+	return setting
+}
+
+func normalizeStripeSetting(setting model.StripeSetting) model.StripeSetting {
+	return setting
+}
+
+func normalizeKYCSetting(setting model.KYCSetting) model.KYCSetting {
+	if setting.Provider == "" {
+		setting.Provider = "didit"
+	}
+	if !setting.RewardOnce {
+		setting.RewardOnce = true
+	}
+	if setting.RewardCredits < 0 {
+		setting.RewardCredits = 0
+	}
+	if setting.RewardWorkflowCreateCredits < 0 {
+		setting.RewardWorkflowCreateCredits = 0
 	}
 	return setting
 }
@@ -236,6 +255,10 @@ func hidePrivateAPIKeys(settings model.Settings) model.Settings {
 	}
 	settings.Private.Mail.Password = ""
 	settings.Private.CloudStorage.SecretAccessKey = ""
+	settings.Private.Stripe.SecretKey = ""
+	settings.Private.Stripe.WebhookSecret = ""
+	settings.Private.KYC.DiditAPIKey = ""
+	settings.Private.KYC.DiditWebhookSecret = ""
 	return settings
 }
 
@@ -276,6 +299,21 @@ func keepPrivateAuthSecrets(settings *model.Settings, saved model.Settings) {
 func keepCloudStorageSecrets(settings *model.Settings, saved model.Settings) {
 	if strings.TrimSpace(settings.Private.CloudStorage.SecretAccessKey) == "" {
 		settings.Private.CloudStorage.SecretAccessKey = saved.Private.CloudStorage.SecretAccessKey
+	}
+}
+
+func keepBillingAndKYCSecrets(settings *model.Settings, saved model.Settings) {
+	if strings.TrimSpace(settings.Private.Stripe.SecretKey) == "" {
+		settings.Private.Stripe.SecretKey = saved.Private.Stripe.SecretKey
+	}
+	if strings.TrimSpace(settings.Private.Stripe.WebhookSecret) == "" {
+		settings.Private.Stripe.WebhookSecret = saved.Private.Stripe.WebhookSecret
+	}
+	if strings.TrimSpace(settings.Private.KYC.DiditAPIKey) == "" {
+		settings.Private.KYC.DiditAPIKey = saved.Private.KYC.DiditAPIKey
+	}
+	if strings.TrimSpace(settings.Private.KYC.DiditWebhookSecret) == "" {
+		settings.Private.KYC.DiditWebhookSecret = saved.Private.KYC.DiditWebhookSecret
 	}
 }
 

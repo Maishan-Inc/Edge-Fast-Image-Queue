@@ -3,7 +3,6 @@
 import { BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
-import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
@@ -13,18 +12,22 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
-import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
-import { isCloudStorageKey, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { uploadMediaFile } from "@/services/file-storage";
+import { deleteGenerationHistory, fetchGenerationHistories, saveGenerationHistory, type GenerationHistory, type GenerationHistoryMedia } from "@/services/api/generation-history";
+import { uploadImage } from "@/services/image-storage";
 import { requestVideoGeneration } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
 type GeneratedVideo = {
     id: string;
     url: string;
     storageKey: string;
+    cloudFileId?: string;
+    expiresAt?: string;
     durationMs: number;
     width: number;
     height: number;
@@ -61,9 +64,6 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vqu
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
-const LOG_STORE_KEY = "aivro:video_generation_logs";
-const logStore = localforage.createInstance({ name: "aivro", storeName: "video_generation_logs" });
-
 export default function VideoPage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,8 +71,8 @@ export default function VideoPage() {
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const token = useUserStore((state) => state.token);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
@@ -99,7 +99,7 @@ export default function VideoPage() {
 
     useEffect(() => {
         void refreshLogs();
-    }, []);
+    }, [token]);
 
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/")).slice(0, 7 - references.length);
@@ -149,6 +149,8 @@ export default function VideoPage() {
                 id: nanoid(),
                 url: stored.url,
                 storageKey: stored.storageKey,
+                cloudFileId: stored.cloudFileId,
+                expiresAt: stored.expiresAt,
                 durationMs: performance.now() - batchStartedAt,
                 width: stored.width || 1280,
                 height: stored.height || 720,
@@ -175,8 +177,7 @@ export default function VideoPage() {
             return null;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning("请先完成配置");
-            openConfigDialog(true);
+            message.warning("管理员尚未配置可用模型");
             return null;
         }
         return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references] };
@@ -224,11 +225,8 @@ export default function VideoPage() {
     };
 
     const deleteSelectedLogs = () => {
-        const mediaKeys = logs
-            .filter((log) => selectedLogIds.includes(log.id))
-            .map((log) => log.video?.storageKey)
-            .filter((key): key is string => Boolean(key));
-        void Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
+        if (!token) return;
+        void Promise.all(selectedLogIds.map((id) => deleteGenerationHistory(token, id))).then(refreshLogs);
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
@@ -238,10 +236,37 @@ export default function VideoPage() {
     };
 
     const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+        if (!token || !log.video) return;
+        const media = videoToHistoryMedia(log.video);
+        if (!media) return;
+        void saveGenerationHistory(token, {
+            type: "video",
+            title: log.title,
+            prompt: log.prompt,
+            model: log.model,
+            config: {
+                model: log.config.model || "",
+                videoModel: log.config.videoModel || "",
+                size: log.config.size || "",
+                vquality: log.config.vquality || "",
+                videoSeconds: log.config.videoSeconds || "",
+            },
+            references: log.references.map((item) => ({ name: item.name, type: item.type, url: item.dataUrl, storageKey: item.storageKey || "" })),
+            media: [media],
+            status: log.status,
+            error: log.error || "",
+            durationMs: Math.round(log.durationMs),
+        }).then(refreshLogs);
     };
 
-    const refreshLogs = async () => setLogs(await readStoredLogs());
+    const refreshLogs = async () => {
+        if (!token) {
+            setLogs([]);
+            return;
+        }
+        const data = await fetchGenerationHistories(token, { type: "video", pageSize: 100 });
+        setLogs(data.items.map(historyToVideoLog));
+    };
 
     const previewGenerationLog = (log: GenerationLog) => {
         setPreviewLog(log);
@@ -327,7 +352,7 @@ export default function VideoPage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} onMissingConfig={() => message.warning("管理员尚未配置可用模型")} />
                             </div>
                         </div>
 
@@ -372,7 +397,7 @@ export default function VideoPage() {
             </Drawer>
             <Drawer title="参数" placement="bottom" height="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} onMissingConfig={() => message.warning("管理员尚未配置可用模型")} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
@@ -384,14 +409,14 @@ export default function VideoPage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings({ config, model, updateConfig, onMissingConfig }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; onMissingConfig: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} fullWidth onMissingConfig={onMissingConfig} />
             </label>
             <div className="col-span-2">
                 <VideoSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
@@ -527,52 +552,64 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     );
 }
 
-async function readStoredLogs() {
-    if (typeof window === "undefined") return [];
-    try {
-        const logs: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
-            logs.push(value);
-        });
-        return (await Promise.all(logs.map(normalizeLog))).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    } catch {
-        return [];
-    }
-}
-
-async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
-    const video = log.video?.storageKey ? { ...log.video, url: await resolveMediaUrl(log.video.storageKey, log.video.url) } : log.video;
-    const references = await Promise.all(
-        (log.references || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
-    );
-    const config = normalizeLogConfig(log);
+function historyToVideoLog(history: GenerationHistory): GenerationLog {
+    const config = normalizeLogConfig({
+        config: {
+            model: history.config?.model,
+            videoModel: history.config?.videoModel,
+            size: history.config?.size,
+            vquality: history.config?.vquality,
+            videoSeconds: history.config?.videoSeconds,
+        },
+        model: history.model,
+    });
+    const media = history.media[0];
+    const video = media
+        ? {
+              id: media.cloudFileId,
+              url: media.url,
+              storageKey: media.storageKey,
+              cloudFileId: media.cloudFileId,
+              expiresAt: media.expiresAt,
+              durationMs: history.durationMs,
+              width: media.width || 1280,
+              height: media.height || 720,
+              bytes: media.size || 0,
+              mimeType: media.contentType || "video/mp4",
+          }
+        : undefined;
     return {
-        id: log.id || nanoid(),
-        createdAt: log.createdAt || Date.now(),
-        title: log.title || log.model || "未命名",
-        prompt: log.prompt || "",
-        time: log.time || new Date().toLocaleString("zh-CN", { hour12: false }),
-        model: log.model || config.videoModel || "",
+        id: history.id,
+        createdAt: Date.parse(history.createdAt) || Date.now(),
+        title: history.title || history.model || "未命名",
+        prompt: history.prompt || "",
+        time: new Date(history.createdAt).toLocaleString("zh-CN", { hour12: false }),
+        model: history.model || config.videoModel || "",
         config,
-        references,
-        durationMs: log.durationMs || 0,
-        size: log.size || config.size || "",
-        resolution: normalizeResolution(log.resolution || config.vquality || ""),
-        seconds: log.seconds || config.videoSeconds || "",
-        status: log.status || "成功",
+        references: (history.references || []).map((item, index) => ({ id: `${history.id}-ref-${index}`, name: item.name, type: item.type, dataUrl: item.url, storageKey: item.storageKey })),
+        durationMs: history.durationMs || 0,
+        size: config.size || "",
+        resolution: normalizeResolution(config.vquality || ""),
+        seconds: config.videoSeconds || "",
+        status: history.status || "成功",
         video,
-        error: log.error,
+        error: history.error,
     };
 }
 
-function serializeLog(log: GenerationLog): GenerationLog {
+function videoToHistoryMedia(video: GeneratedVideo): GenerationHistoryMedia | null {
+    const cloudFileId = video.cloudFileId || (video.storageKey?.startsWith("cloud:") ? video.storageKey.slice("cloud:".length) : "");
+    if (!cloudFileId || !video.storageKey?.startsWith("cloud:")) return null;
     return {
-        ...log,
-        references: log.references.map((item) => ({ ...item, dataUrl: item.storageKey && !isCloudStorageKey(item.storageKey) ? "" : item.dataUrl })),
-        video: log.video?.storageKey && !log.video.storageKey.startsWith("cloud:") ? { ...log.video, url: "" } : log.video,
+        cloudFileId,
+        storageKey: video.storageKey,
+        url: video.url,
+        fileType: "video",
+        contentType: video.mimeType || "video/mp4",
+        size: video.bytes || 0,
+        width: video.width || 0,
+        height: video.height || 0,
+        expiresAt: video.expiresAt || "",
     };
 }
 

@@ -35,7 +35,11 @@ var (
 var databaseMigrationSources = []string{
 	"repository/db.go",
 	"model/user.go",
+	"model/workflow.go",
+	"model/billing.go",
+	"model/kyc.go",
 	"model/content.go",
+	"model/generation_history.go",
 	"model/setting.go",
 }
 
@@ -105,7 +109,7 @@ func DatabaseStatus() (model.DatabaseStatus, error) {
 }
 
 func migrateModels(db *gorm.DB) error {
-	return db.AutoMigrate(
+	err := db.AutoMigrate(
 		&model.User{},
 		&model.EmailVerification{},
 		&model.CreditLog{},
@@ -113,8 +117,20 @@ func migrateModels(db *gorm.DB) error {
 		&model.Asset{},
 		&model.Setting{},
 		&model.CloudFile{},
+		&model.GenerationHistory{},
+		&model.Workflow{},
+		&model.WorkflowShare{},
+		&model.WorkflowShareCopy{},
+		&model.Plan{},
+		&model.PlanOrder{},
+		&model.EntitlementLog{},
+		&model.KYCVerification{},
 		&model.DatabaseUpdateLog{},
 	)
+	if err != nil {
+		return err
+	}
+	return ensureDefaultPlans(db)
 }
 
 func databaseMigrationModels() []string {
@@ -141,8 +157,38 @@ func databaseMigrationModelItems() []struct {
 		{"model.Asset", &model.Asset{}},
 		{"model.Setting", &model.Setting{}},
 		{"model.CloudFile", &model.CloudFile{}},
+		{"model.GenerationHistory", &model.GenerationHistory{}},
+		{"model.Workflow", &model.Workflow{}},
+		{"model.WorkflowShare", &model.WorkflowShare{}},
+		{"model.WorkflowShareCopy", &model.WorkflowShareCopy{}},
+		{"model.Plan", &model.Plan{}},
+		{"model.PlanOrder", &model.PlanOrder{}},
+		{"model.EntitlementLog", &model.EntitlementLog{}},
+		{"model.KYCVerification", &model.KYCVerification{}},
 		{"model.DatabaseUpdateLog", &model.DatabaseUpdateLog{}},
 	}
+}
+
+func ensureDefaultPlans(db *gorm.DB) error {
+	now := time.Now().Format(time.RFC3339)
+	defaults := []model.Plan{
+		{ID: "plan-go", Code: model.PlanCodeGO, Name: "GO", Description: "适合轻量体验的入门套餐", PriceCents: 900, Currency: "USD", Credits: 100, WorkflowCreateCredits: 1, Enabled: true, Sort: 10, CreatedAt: now, UpdatedAt: now},
+		{ID: "plan-plus", Code: model.PlanCodePlus, Name: "Plus", Description: "适合稳定创作的标准套餐", PriceCents: 1900, Currency: "USD", Credits: 300, WorkflowCreateCredits: 5, Enabled: true, Recommended: true, Sort: 20, CreatedAt: now, UpdatedAt: now},
+		{ID: "plan-pro", Code: model.PlanCodePro, Name: "Pro", Description: "适合高频生成和多个云端工作流", PriceCents: 4900, Currency: "USD", Credits: 900, WorkflowCreateCredits: 20, Enabled: true, Sort: 30, CreatedAt: now, UpdatedAt: now},
+		{ID: "plan-max", Code: model.PlanCodeMax, Name: "Max", Description: "适合团队或重度创作", PriceCents: 9900, Currency: "USD", Credits: 2200, WorkflowCreateCredits: 60, Enabled: true, Sort: 40, CreatedAt: now, UpdatedAt: now},
+	}
+	for _, item := range defaults {
+		var count int64
+		if err := db.Model(&model.Plan{}).Where("code = ?", item.Code).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			if err := db.Create(&item).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func dialector(driver string, dsn string) gorm.Dialector {

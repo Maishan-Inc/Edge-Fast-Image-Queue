@@ -4,9 +4,10 @@
 
 ## 当前存储位置
 
-当前画布项目主要保存在浏览器本地：
+当前画布项目保存到后端 `workflows` 表：
 
-- 画布项目 JSON：`localForage`，数据库名 `aivro`，storeName `app_state`，key 为 `aivro:canvas_store`。
+- 画布项目 JSON：通过 `/api/v1/workflows`、`/api/v1/workflows/:id` 读取和保存。
+- 浏览器本地只保存选中节点、面板展开、缩放等临时 UI 状态，不再保存工作流项目列表和项目内容。
 - 我的素材 JSON：`localForage`，数据库名 `aivro`，storeName `app_state`，key 为 `aivro:asset_store`。
 - 图片 Blob：单独存到 `localForage` 实例，数据库名 `aivro`，storeName `image_files`。
 - 视频等媒体 Blob：单独存到 `localForage` 实例，数据库名 `aivro`，storeName `media_files`。

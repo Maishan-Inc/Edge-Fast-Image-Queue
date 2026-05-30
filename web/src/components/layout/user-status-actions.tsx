@@ -2,19 +2,17 @@
 
 import type { CSSProperties, RefObject } from "react";
 import { Avatar, Dropdown, Tooltip } from "antd";
-import { Keyboard, LogOut, Settings2, Shield } from "lucide-react";
+import { Keyboard, LogOut, Shield } from "lucide-react";
 import type { ItemType } from "antd/es/menu/interface";
 import Link from "next/link";
 
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { CreditSymbol } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 
 type UserStatusActionsProps = {
-    showConfig?: boolean;
     variant?: "default" | "canvas";
     onOpenShortcuts?: () => void;
     accountOpen?: boolean;
@@ -23,12 +21,11 @@ type UserStatusActionsProps = {
     getPopupContainer?: (node: HTMLElement) => HTMLElement;
 };
 
-export function UserStatusActions({ showConfig = true, variant = "default", onOpenShortcuts, accountOpen, onAccountOpenChange, accountRef, getPopupContainer }: UserStatusActionsProps) {
+export function UserStatusActions({ variant = "default", onOpenShortcuts, accountOpen, onAccountOpenChange, accountRef, getPopupContainer }: UserStatusActionsProps) {
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
     const user = useUserStore((state) => state.user);
     const logout = useUserStore((state) => state.clearSession);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const canvasTheme = canvasThemes[theme];
     const userName = user?.displayName || user?.username || "";
     const credits = user?.credits ?? 0;
@@ -47,11 +44,6 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
 
     return (
         <div className="inline-flex shrink-0 items-center gap-1.5">
-            {showConfig ? (
-                <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="配置" title="配置">
-                    <Settings2 className="size-4" />
-                </button>
-            ) : null}
             <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={naturalIconClass} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
             {variant === "canvas" && user ? (
                 <Tooltip title="当前算力点余额" placement="bottom">

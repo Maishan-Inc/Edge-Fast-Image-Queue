@@ -1,19 +1,17 @@
 "use client";
 
 import { Dropdown } from "antd";
-import { Check, Languages, Menu, Settings2 } from "lucide-react";
+import { Check, Languages, Menu } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 import { AnimatedThemeToggler } from "@/components/ui/animated-theme-toggler";
 import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
-import { AppConfigModal } from "@/components/layout/app-config-modal";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { localeLabels, type Locale } from "@/i18n/messages";
 import { useI18n } from "@/hooks/use-i18n";
-import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { cn } from "@/lib/utils";
@@ -21,7 +19,6 @@ import { cn } from "@/lib/utils";
 export function AppTopNav() {
     const pathname = usePathname();
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
     const user = useUserStore((state) => state.user);
@@ -115,15 +112,6 @@ export function AppTopNav() {
                                 <UserStatusActions />
                             ) : (
                                 <>
-                                    <button
-                                        type="button"
-                                        className="inline-flex size-8 shrink-0 items-center justify-center text-stone-600 transition hover:text-stone-950 dark:text-stone-300 dark:hover:text-white [&_svg]:size-4"
-                                        onClick={() => openConfigDialog(false)}
-                                        aria-label={t("common.config")}
-                                        title={t("common.config")}
-                                    >
-                                        <Settings2 className="size-4" />
-                                    </button>
                                     <AnimatedThemeToggler
                                         theme={theme}
                                         onThemeChange={setTheme}
@@ -142,7 +130,6 @@ export function AppTopNav() {
             ) : null}
 
             <MobileNavDrawer open={mobileNavOpen} activeToolSlug={activeToolSlug} onClose={() => setMobileNavOpen(false)} />
-            <AppConfigModal />
         </>
     );
 }

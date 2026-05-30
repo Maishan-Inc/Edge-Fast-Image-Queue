@@ -8,9 +8,6 @@ import { apiGet } from "@/services/api/request";
 import type { AdminPublicSettings } from "@/services/api/admin";
 
 export type AiConfig = {
-    channelMode: "remote" | "local";
-    baseUrl: string;
-    apiKey: string;
     model: string;
     imageModel: string;
     videoModel: string;
@@ -27,9 +24,6 @@ export type AiConfig = {
 export const CONFIG_STORE_KEY = "aivro:ai_config_store";
 
 export const defaultConfig: AiConfig = {
-    channelMode: "local",
-    baseUrl: "https://api.openai.com",
-    apiKey: "",
     model: "gpt-image-2",
     imageModel: "gpt-image-2",
     videoModel: "grok-imagine-video",
@@ -47,35 +41,51 @@ type ConfigStore = {
     config: AiConfig;
     publicSettings: AdminPublicSettings | null;
     isPublicSettingsLoading: boolean;
-    isConfigOpen: boolean;
-    shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     loadPublicSettings: () => Promise<void>;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
-    openConfigDialog: (shouldPromptContinue?: boolean) => void;
-    setConfigDialogOpen: (isOpen: boolean) => void;
-    clearPromptContinue: () => void;
 };
 
 function resolveEffectiveConfig(config: AiConfig, modelChannel: AdminPublicSettings["modelChannel"] | null) {
-    const channelMode = modelChannel?.allowCustomChannel ? config.channelMode : "remote";
-    if (channelMode === "local" || !modelChannel) return { ...config, channelMode };
-    const models = modelChannel.availableModels;
-    const fallbackModel = modelChannel.defaultModel || models[0] || "";
+    const models = modelChannel?.availableModels || [];
+    const fallbackModel = defaultAllowedModel(models, modelChannel?.defaultModel);
+    const fallbackImageModel = defaultAllowedModel(models, modelChannel?.defaultImageModel) || fallbackModel;
+    const fallbackVideoModel = defaultAllowedModel(models, modelChannel?.defaultVideoModel) || fallbackModel;
+    const fallbackTextModel = defaultAllowedModel(models, modelChannel?.defaultTextModel) || fallbackModel;
     return {
         ...config,
-        channelMode,
         models,
         model: models.includes(config.model) ? config.model : fallbackModel,
-        imageModel: models.includes(config.imageModel) ? config.imageModel : modelChannel.defaultImageModel || fallbackModel,
-        videoModel: models.includes(config.videoModel) ? config.videoModel : modelChannel.defaultVideoModel || fallbackModel,
-        textModel: models.includes(config.textModel) ? config.textModel : modelChannel.defaultTextModel || fallbackModel,
-        systemPrompt: modelChannel.systemPrompt,
+        imageModel: models.includes(config.imageModel) ? config.imageModel : fallbackImageModel,
+        videoModel: models.includes(config.videoModel) ? config.videoModel : fallbackVideoModel,
+        textModel: models.includes(config.textModel) ? config.textModel : fallbackTextModel,
+        systemPrompt: modelChannel?.systemPrompt || "",
     };
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
-    return Boolean(model.trim()) && (config.channelMode === "remote" || Boolean(config.baseUrl.trim() && config.apiKey.trim()));
+    return Boolean(model.trim()) && config.models.includes(model);
+}
+
+function defaultAllowedModel(models: string[], model?: string) {
+    return model && models.includes(model) ? model : models[0] || "";
+}
+
+function normalizeStoredConfig(value: Partial<AiConfig> = {}): AiConfig {
+    return {
+        ...defaultConfig,
+        model: value.model || defaultConfig.model,
+        imageModel: value.imageModel || value.model || defaultConfig.imageModel,
+        videoModel: value.videoModel || defaultConfig.videoModel,
+        textModel: value.textModel || value.model || defaultConfig.textModel,
+        videoSeconds: value.videoSeconds || defaultConfig.videoSeconds,
+        vquality: value.vquality || defaultConfig.vquality,
+        systemPrompt: "",
+        models: [],
+        quality: value.quality || defaultConfig.quality,
+        size: value.size || defaultConfig.size,
+        count: value.count || defaultConfig.count,
+    };
 }
 
 export const useConfigStore = create<ConfigStore>()(
@@ -84,8 +94,6 @@ export const useConfigStore = create<ConfigStore>()(
             config: defaultConfig,
             publicSettings: null,
             isPublicSettingsLoading: false,
-            isConfigOpen: false,
-            shouldPromptContinue: false,
             updateConfig: (key, value) =>
                 set((state) => ({
                     config: {
@@ -103,16 +111,12 @@ export const useConfigStore = create<ConfigStore>()(
                 }
             },
             isAiConfigReady: (config, model) => isAiConfigReady(config, model),
-            openConfigDialog: (shouldPromptContinue = false) => set({ isConfigOpen: true, shouldPromptContinue }),
-            setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
-            clearPromptContinue: () => set({ shouldPromptContinue: false }),
         }),
         {
             name: CONFIG_STORE_KEY,
             partialize: (state) => ({ config: state.config }),
             merge: (persisted, current) => {
-                const config = { ...defaultConfig, ...((persisted as Partial<ConfigStore>).config || {}) };
-                return { ...current, config: { ...config, channelMode: config.channelMode || "remote", imageModel: config.imageModel || config.model, videoModel: config.videoModel || "grok-imagine-video", textModel: config.textModel || config.model, videoSeconds: config.videoSeconds || "6", vquality: config.vquality || "720" } };
+                return { ...current, config: normalizeStoredConfig((persisted as Partial<ConfigStore>).config || {}) };
             },
         },
     ),
@@ -122,10 +126,4 @@ export function useEffectiveConfig() {
     const config = useConfigStore((state) => state.config);
     const modelChannel = useConfigStore((state) => state.publicSettings?.modelChannel || null);
     return useMemo(() => resolveEffectiveConfig(config, modelChannel), [config, modelChannel]);
-}
-
-export function buildApiUrl(baseUrl: string, path: string) {
-    const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
-    const apiBaseUrl = normalizedBaseUrl.endsWith("/v1") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`;
-    return `${apiBaseUrl}${path}`;
 }

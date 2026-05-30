@@ -12,16 +12,16 @@
 ```json
 {
   "modelChannel": {
-    "availableModels": ["gpt-5.5", "gpt-image-2"],
+    "availableModels": ["gpt-5.5", "gpt-image-2", "grok-imagine-video"],
     "modelCosts": [
       { "model": "gpt-5.5", "credits": 1 },
       { "model": "gpt-image-2", "credits": 10 }
     ],
     "defaultModel": "gpt-image-2",
     "defaultImageModel": "gpt-image-2",
+    "defaultVideoModel": "grok-imagine-video",
     "defaultTextModel": "gpt-5.5",
-    "systemPrompt": "",
-    "allowCustomChannel": true
+    "systemPrompt": ""
   },
   "auth": {
     "allowRegister": true,
@@ -63,9 +63,9 @@
 | `modelCosts` | object[] | 模型算力点配置，后端模型接口调用前按模型预扣，上游失败时返还；未配置默认不扣除 |
 | `defaultModel` | string | 默认模型，从 `availableModels` 中选择 |
 | `defaultImageModel` | string | 默认图片模型，从 `availableModels` 中选择 |
+| `defaultVideoModel` | string | 默认视频模型，从 `availableModels` 中选择 |
 | `defaultTextModel` | string | 默认文本模型，从 `availableModels` 中选择 |
 | `systemPrompt` | string | 系统提示词 |
-| `allowCustomChannel` | boolean | 是否允许用户在配置弹窗中切换为本地直连渠道，默认允许 |
 
 `modelCosts` 每项字段：
 
@@ -74,12 +74,7 @@
 | `model` | string | 模型名称 |
 | `credits` | number | 每次后端模型接口调用前预扣的算力点 |
 
-用户侧请求模式：
-
-| 模式 | 说明 |
-| --- | --- |
-| 云端渠道 | 使用后端 `/api/v1/*` 代理接口，请求会按模型名匹配 `private.value.channels` 中的可用渠道 |
-| 本地直连 | 默认可选；`allowCustomChannel` 关闭后不可选，用户在浏览器本地配置 `baseUrl`、`apiKey` 和模型列表后直接请求模型接口 |
+用户侧请求统一使用后端 `/api/v1/*` 代理接口，请求会按模型名匹配 `private.value.channels` 中启用且包含该模型的可用渠道。用户侧不提供 Base URL、API Key 或本地直连配置。
 
 `auth` 字段：
 
@@ -166,6 +161,24 @@
     "videoExpireDays": 7,
     "autoCleanupEnabled": true,
     "pathStyleEndpoint": true
+  },
+  "stripe": {
+    "enabled": false,
+    "secretKey": "",
+    "webhookSecret": "",
+    "successUrl": "",
+    "cancelUrl": ""
+  },
+  "kyc": {
+    "enabled": false,
+    "provider": "didit",
+    "diditApiKey": "",
+    "diditWebhookSecret": "",
+    "workflowId": "",
+    "callbackUrl": "",
+    "rewardCredits": 0,
+    "rewardWorkflowCreateCredits": 0,
+    "rewardOnce": true
   }
 }
 ```
@@ -177,6 +190,8 @@
 | `auth` | object | OAuth、MetaMask 和自定义登录私有配置 |
 | `mail` | object | SMTP 验证码与邮件模板配置 |
 | `cloudStorage` | object | Cloudflare R2 / S3 兼容云存储配置 |
+| `stripe` | object | Stripe 支付私有配置 |
+| `kyc` | object | Didit KYC 私有配置 |
 
 `channels` 每项字段：
 
@@ -213,6 +228,51 @@
 | `pathStyleEndpoint` | boolean | 是否使用 Path Style Endpoint，R2 默认开启 |
 
 路径模板支持 `{username}`、`{yyyy}`、`{mm}`、`{dd}`、`{filename}`。开启云存储后，后端会把图片和视频生成结果转存到云端，写入 `cloud_files`，并把接口返回内容改为云端 `public_url`；图片和视频过期时间按各自天数分别计算。自动清理只删除已到期且未标记删除的云端对象，删除失败只记录日志。
+
+`stripe` 字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `enabled` | boolean | 是否启用 Stripe 支付 |
+| `secretKey` | string | Stripe Secret Key，后台返回时隐藏；编辑留空表示沿用已保存密钥 |
+| `webhookSecret` | string | Stripe Webhook Secret，后台返回时隐藏；编辑留空表示沿用已保存密钥 |
+| `successUrl` | string | Checkout 支付成功跳转地址，可包含 `{CHECKOUT_SESSION_ID}` |
+| `cancelUrl` | string | Checkout 取消支付跳转地址 |
+
+Stripe Checkout Session 只能由后端创建。用户支付成功后，额度发放必须以 `/api/webhooks/stripe` 收到并校验通过的 `checkout.session.completed` webhook 为准；订单已标记 `paid` 时重复 webhook 不会重复发放额度。
+
+`kyc` 字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `enabled` | boolean | 是否启用 KYC |
+| `provider` | string | 当前固定为 `didit` |
+| `diditApiKey` | string | Didit API Key，后台返回时隐藏；编辑留空表示沿用已保存密钥 |
+| `diditWebhookSecret` | string | Didit Webhook Secret，后台返回时隐藏；编辑留空表示沿用已保存密钥 |
+| `workflowId` | string | Didit Workflow ID |
+| `callbackUrl` | string | Didit webhook 回调地址，默认可使用 `/api/webhooks/didit` |
+| `rewardCredits` | number | 认证通过奖励算力点 |
+| `rewardWorkflowCreateCredits` | number | 认证通过奖励工作流创建次数 |
+| `rewardOnce` | boolean | 是否每个用户只奖励一次，默认开启 |
+
+Didit session 只能由后端创建，API Key 不返回前端。Didit approved webhook 校验通过后会幂等发放奖励并写入 `entitlement_logs`；rejected / expired 只更新认证状态。
+
+## 套餐配置
+
+套餐数据保存在 `plans` 表中，默认初始化 GO、Plus、Pro、Max 四个套餐。管理员可在“套餐管理”页面编辑套餐名称、描述、价格、币种、算力点额度、工作流创建次数、启用状态、推荐状态和排序。
+
+前台 `/pricing` 读取启用套餐；登录用户点击购买后调用后端 `/api/v1/checkout/stripe` 创建 Stripe Checkout Session，前端只负责跳转到 Stripe，不参与权益发放。
+
+## 云端工作流与分享规则
+
+工作流项目全面保存到后端 `workflows` 表。浏览器本地只允许保存临时 UI 状态，不再保存工作流项目列表或工作流内容。创建普通工作流、复制分享工作流都会消耗 1 次 `workflow_create_credits`，次数不足时后端返回：“当前账号暂无工作流创建次数，请完成 KYC 认证或购买套餐获取更多创建次数。”
+
+分享链接保存在 `workflow_shares`。同一工作流再次点击分享会更新原分享快照并递增版本，不生成新 token。分享密码只保存哈希；分享详情需要登录访问，未验证密码时不返回完整快照。
+
+复制分享时会在复制者账号下创建新的云端工作流：
+
+- `detached`：复制后独立，不再跟随原分享更新。
+- `linked`：记录来源分享和版本；原作者更新分享时，系统按 `workflow_share_copies.workflow_id + user_id` 精确覆盖同步 linked 工作流内容。
 
 `promptSync` 字段：
 

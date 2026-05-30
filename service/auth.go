@@ -471,6 +471,7 @@ func SaveUser(user model.User, password string) (model.User, error) {
 		user.Password = saved.Password
 		user.AvatarURL = saved.AvatarURL
 		user.Credits = saved.Credits
+		user.WorkflowCreateCredits = saved.WorkflowCreateCredits
 		user.Extra = saved.Extra
 		if user.AffCode == "" {
 			user.AffCode = saved.AffCode

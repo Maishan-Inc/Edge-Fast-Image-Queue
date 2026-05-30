@@ -3,7 +3,6 @@
 import { BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Typography } from "antd";
-import localforage from "localforage";
 import { saveAs } from "file-saver";
 
 import { AivroDrawableLoader } from "@/components/aivro-drawable-loader";
@@ -17,14 +16,18 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
-import { deleteStoredImages, isCloudStorageKey, resolveImageUrl, storeGeneratedImage, uploadImage } from "@/services/image-storage";
+import { deleteGenerationHistory, fetchGenerationHistories, saveGenerationHistory, type GenerationHistory, type GenerationHistoryMedia } from "@/services/api/generation-history";
+import { storeGeneratedImage, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
+import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
 type GeneratedImage = {
     id: string;
     dataUrl: string;
     storageKey?: string;
+    cloudFileId?: string;
+    expiresAt?: string;
     durationMs: number;
     width: number;
     height: number;
@@ -63,9 +66,6 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
-const LOG_STORE_KEY = "aivro:image_generation_logs";
-const logStore = localforage.createInstance({ name: "aivro", storeName: "image_generation_logs" });
-
 export default function ImagePage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -73,8 +73,8 @@ export default function ImagePage() {
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const token = useUserStore((state) => state.token);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
@@ -102,7 +102,7 @@ export default function ImagePage() {
 
     useEffect(() => {
         void refreshLogs();
-    }, []);
+    }, [token]);
 
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
@@ -143,8 +143,7 @@ export default function ImagePage() {
             return;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning("请先完成配置");
-            openConfigDialog(true);
+            message.warning("管理员尚未配置可用模型");
             return;
         }
 
@@ -237,8 +236,8 @@ export default function ImagePage() {
     };
 
     const deleteSelectedLogs = () => {
-        const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
+        if (!token) return;
+        void Promise.all(selectedLogIds.map((id) => deleteGenerationHistory(token, id))).then(refreshLogs);
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
@@ -248,10 +247,37 @@ export default function ImagePage() {
     };
 
     const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+        if (!token) return;
+        const media = log.images.map(imageToHistoryMedia).filter((item): item is GenerationHistoryMedia => Boolean(item));
+        if (!media.length) return;
+        void saveGenerationHistory(token, {
+            type: "image",
+            title: log.title,
+            prompt: log.prompt,
+            model: log.model,
+            config: {
+                model: log.config.model || "",
+                imageModel: log.config.imageModel || "",
+                quality: log.config.quality || "",
+                size: log.config.size || "",
+                count: log.config.count || "",
+            },
+            references: log.references.map((item) => ({ name: item.name, type: item.type, url: item.dataUrl, storageKey: item.storageKey || "" })),
+            media,
+            status: log.status,
+            error: "",
+            durationMs: Math.round(log.durationMs),
+        }).then(refreshLogs);
     };
 
-    const refreshLogs = async () => setLogs(await readStoredLogs());
+    const refreshLogs = async () => {
+        if (!token) {
+            setLogs([]);
+            return;
+        }
+        const data = await fetchGenerationHistories(token, { type: "image", pageSize: 100 });
+        setLogs(data.items.map(historyToImageLog));
+    };
 
     const previewGenerationLog = async (log: GenerationLog) => {
         setPreviewLog(log);
@@ -272,8 +298,7 @@ export default function ImagePage() {
             return null;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning("请先完成配置");
-            openConfigDialog(true);
+            message.warning("管理员尚未配置可用模型");
             return null;
         }
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
@@ -286,7 +311,7 @@ export default function ImagePage() {
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, storageKey: image.storageKey, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: image.bytes ?? getDataUrlByteSize(image.dataUrl), mimeType: image.mimeType };
+            const nextImage = { id: image.id, dataUrl: image.dataUrl, storageKey: image.storageKey, cloudFileId: image.cloudFileId, expiresAt: image.expiresAt, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: image.bytes ?? getDataUrlByteSize(image.dataUrl), mimeType: image.mimeType };
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
@@ -399,7 +424,7 @@ export default function ImagePage() {
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                                <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} onMissingConfig={() => message.warning("管理员尚未配置可用模型")} />
                             </div>
                         </div>
 
@@ -469,7 +494,7 @@ export default function ImagePage() {
             </Drawer>
             <Drawer title="参数" placement="bottom" height="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} onMissingConfig={() => message.warning("管理员尚未配置可用模型")} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
@@ -481,14 +506,14 @@ export default function ImagePage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings({ config, model, updateConfig, onMissingConfig }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; onMissingConfig: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} fullWidth onMissingConfig={onMissingConfig} />
             </label>
             <div className="col-span-2">
                 <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
@@ -680,61 +705,63 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     );
 }
 
-async function readStoredLogs() {
-    if (typeof window === "undefined") return [];
-    try {
-        const values: GenerationLog[] = [];
-        await logStore.iterate<GenerationLog, void>((value) => {
-            values.push(value);
-        });
-        const logs = await Promise.all(values.map(normalizeLog));
-        return logs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    } catch {
-        return [];
-    }
-}
-
-async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog> {
-    const references = await Promise.all(
-        (log.references || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
-    );
-    const images = await Promise.all(
-        (log.images || []).map(async (item) => ({
-            ...item,
-            dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
-        })),
-    );
-    const config = normalizeLogConfig(log);
+function historyToImageLog(history: GenerationHistory): GenerationLog {
+    const config = normalizeLogConfig({
+        config: {
+            model: history.config?.model,
+            imageModel: history.config?.imageModel,
+            quality: history.config?.quality,
+            size: history.config?.size,
+            count: history.config?.count,
+        },
+        model: history.model,
+    });
+    const images = history.media.map((item) => ({
+        id: item.cloudFileId,
+        dataUrl: item.url,
+        storageKey: item.storageKey,
+        cloudFileId: item.cloudFileId,
+        expiresAt: item.expiresAt,
+        durationMs: history.durationMs,
+        width: item.width || 0,
+        height: item.height || 0,
+        bytes: item.size || 0,
+        mimeType: item.contentType,
+    }));
     return {
-        id: log.id || nanoid(),
-        createdAt: log.createdAt || Date.now(),
-        title: log.title || log.model || "未命名",
-        prompt: log.prompt || log.title || "",
-        time: log.time || new Date().toLocaleString("zh-CN", { hour12: false }),
-        model: log.model || config.imageModel || "",
+        id: history.id,
+        createdAt: Date.parse(history.createdAt) || Date.now(),
+        title: history.title || history.model || "未命名",
+        prompt: history.prompt || history.title || "",
+        time: new Date(history.createdAt).toLocaleString("zh-CN", { hour12: false }),
+        model: history.model || config.imageModel || "",
         config,
-        references,
-        durationMs: log.durationMs || 0,
-        successCount: log.successCount ?? log.imageCount ?? 0,
-        failCount: log.failCount || 0,
-        imageCount: log.imageCount || log.successCount || 0,
-        size: log.size || config.size || "",
-        quality: log.quality || config.quality || "",
-        status: log.status || "成功",
+        references: (history.references || []).map((item, index) => ({ id: `${history.id}-ref-${index}`, name: item.name, type: item.type, dataUrl: item.url, storageKey: item.storageKey })),
+        durationMs: history.durationMs || 0,
+        successCount: images.length,
+        failCount: 0,
+        imageCount: images.length,
+        size: config.size || "",
+        quality: config.quality || "",
+        status: history.status || "成功",
         images,
         thumbnails: images.map((image) => image.dataUrl),
     };
 }
 
-function serializeLog(log: GenerationLog): GenerationLog {
+function imageToHistoryMedia(image: GeneratedImage): GenerationHistoryMedia | null {
+    const cloudFileId = image.cloudFileId || (image.storageKey?.startsWith("cloud:") ? image.storageKey.slice("cloud:".length) : "");
+    if (!cloudFileId || !image.storageKey?.startsWith("cloud:")) return null;
     return {
-        ...log,
-        references: log.references.map((item) => ({ ...item, dataUrl: item.storageKey && !isCloudStorageKey(item.storageKey) ? "" : item.dataUrl })),
-        images: log.images.map((image) => ({ ...image, dataUrl: image.storageKey && !isCloudStorageKey(image.storageKey) ? "" : image.dataUrl })),
-        thumbnails: [],
+        cloudFileId,
+        storageKey: image.storageKey,
+        url: image.dataUrl,
+        fileType: "image",
+        contentType: image.mimeType || "image/png",
+        size: image.bytes || 0,
+        width: image.width || 0,
+        height: image.height || 0,
+        expiresAt: image.expiresAt || "",
     };
 }
 

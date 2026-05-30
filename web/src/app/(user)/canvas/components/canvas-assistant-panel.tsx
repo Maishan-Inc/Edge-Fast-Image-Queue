@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUp, History, ImageIcon, LoaderCircle, MessageSquare, PanelRightClose, Plus, RotateCcw, Settings2, Sparkles, Trash2, X } from "lucide-react";
-import { Button, Modal, Tooltip } from "antd";
+import { ArrowUp, History, ImageIcon, LoaderCircle, MessageSquare, PanelRightClose, Plus, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { App, Button, Modal, Tooltip } from "antd";
 import { motion } from "motion/react";
 
 import { ImageGenerationPending } from "@/components/image-generation-pending";
@@ -41,13 +41,13 @@ type CanvasAssistantPanelProps = {
 };
 
 export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeSessionId, onSelectNodeIds, onSessionsChange, onInsertImage, onInsertText, onPasteImage, onCollapseStart, onCollapse }: CanvasAssistantPanelProps) {
+    const { message } = App.useApp();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const effectiveConfig = useEffectiveConfig();
     const modelCosts = useConfigStore((state) => state.publicSettings?.modelChannel.modelCosts);
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const [width, setWidth] = useState(390);
     const [view, setView] = useState<"chat" | "history">("chat");
     const [mode, setMode] = useState<AssistantMode>("image");
@@ -141,7 +141,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
     const sendMessage = async (text: string, nextMode: AssistantMode, history: CanvasAssistantMessage[], savedReferences?: CanvasAssistantReference[]) => {
         const requestConfig = { ...effectiveConfig, model: nextMode === "image" ? effectiveConfig.imageModel || effectiveConfig.model : effectiveConfig.textModel || effectiveConfig.model };
         if (!isAiConfigReady(requestConfig, requestConfig.model)) {
-            openConfigDialog(true);
+            message.warning("管理员尚未配置可用模型");
             return;
         }
 
@@ -277,9 +277,6 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                                 }}
                             />
                         </Tooltip>
-                        <Tooltip title="配置">
-                            <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<Settings2 className="size-4" />} onClick={() => openConfigDialog(false)} />
-                        </Tooltip>
                         <Tooltip title="收起对话">
                             <Button type="text" shape="circle" className="!h-8 !w-8 !min-w-8" style={iconButtonStyle} icon={<PanelRightClose className="size-4" />} onClick={collapse} />
                         </Tooltip>
@@ -323,7 +320,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                         onPromptChange={setPrompt}
                         onSubmit={submit}
                         onConfigChange={updateConfig}
-                        onMissingConfig={() => openConfigDialog(true)}
+                        onMissingConfig={() => message.warning("管理员尚未配置可用模型")}
                         onRemoveReference={(id) => {
                             setRemovedReferenceIds((prev) => new Set(prev).add(id));
                             if (selectedNodeIds.has(id)) onSelectNodeIds(new Set(Array.from(selectedNodeIds).filter((nodeId) => nodeId !== id)));
@@ -392,7 +389,7 @@ function AssistantComposer({
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const activeModel = mode === "image" ? config.imageModel || config.model : config.textModel || config.model;
-    const credits = requestCreditCost({ channelMode: config.channelMode, modelCosts, model: activeModel, count: mode === "image" ? config.count : 1 });
+    const credits = requestCreditCost({ modelCosts, model: activeModel, count: mode === "image" ? config.count : 1 });
 
     return (
         <div className="px-2 pb-2" onWheelCapture={(event) => event.stopPropagation()}>

@@ -2,7 +2,7 @@ import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
 import { imageToDataUrl } from "@/services/image-storage";
-import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
+import type { AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { UploadedFile } from "@/services/file-storage";
@@ -10,17 +10,17 @@ import type { UploadedFile } from "@/services/file-storage";
 type VideoResponse = { id: string; status?: string; error?: { message?: string } };
 type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
 
-function aiApiUrl(config: AiConfig, path: string) {
-    return config.channelMode === "remote" ? `/api/v1${path}` : buildApiUrl(config.baseUrl, path);
+function aiApiUrl(_config: AiConfig, path: string) {
+    return `/api/v1${path}`;
 }
 
-function aiHeaders(config: AiConfig) {
+function aiHeaders(_config: AiConfig) {
     const token = useUserStore.getState().token;
-    return config.channelMode === "remote" ? (token ? { Authorization: `Bearer ${token}` } : undefined) : { Authorization: `Bearer ${config.apiKey}` };
+    return token ? { Authorization: `Bearer ${token}` } : undefined;
 }
 
-function refreshRemoteUser(config: AiConfig) {
-    if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
+function refreshRemoteUser(_config: AiConfig) {
+    void useUserStore.getState().hydrateUser();
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = []): Promise<Blob | UploadedFile> {
@@ -38,12 +38,12 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
         const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config) })).data);
         if (!created.id) throw new Error("视频接口没有返回任务 ID");
         for (;;) {
-            const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${created.id}`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model } : undefined })).data);
+            const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${created.id}`), { headers: aiHeaders(config), params: { model } })).data);
             if (video.status === "completed") break;
             if (video.status === "failed" || video.status === "cancelled") throw new Error(video.error?.message || "视频生成失败");
             await new Promise((resolve) => setTimeout(resolve, 2500));
         }
-        const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${created.id}/content`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model } : undefined, responseType: "blob" });
+        const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${created.id}/content`), { headers: aiHeaders(config), params: { model }, responseType: "blob" });
         const cloudFile = await readCloudVideoFile(content.data);
         if (cloudFile) {
             refreshRemoteUser(config);

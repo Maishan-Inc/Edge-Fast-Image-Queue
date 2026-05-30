@@ -29,14 +29,13 @@ type ModelCost struct {
 
 // PublicModelChannelSetting 公开模型渠道配置。
 type PublicModelChannelSetting struct {
-	AvailableModels    []string    `json:"availableModels"`
-	ModelCosts         []ModelCost `json:"modelCosts"`
-	DefaultModel       string      `json:"defaultModel"`
-	DefaultImageModel  string      `json:"defaultImageModel"`
-	DefaultVideoModel  string      `json:"defaultVideoModel"`
-	DefaultTextModel   string      `json:"defaultTextModel"`
-	SystemPrompt       string      `json:"systemPrompt"`
-	AllowCustomChannel *bool       `json:"allowCustomChannel"`
+	AvailableModels   []string    `json:"availableModels"`
+	ModelCosts        []ModelCost `json:"modelCosts"`
+	DefaultModel      string      `json:"defaultModel"`
+	DefaultImageModel string      `json:"defaultImageModel"`
+	DefaultVideoModel string      `json:"defaultVideoModel"`
+	DefaultTextModel  string      `json:"defaultTextModel"`
+	SystemPrompt      string      `json:"systemPrompt"`
 }
 
 // PublicSetting 公开配置。
@@ -86,6 +85,28 @@ type PrivateSetting struct {
 	Auth         PrivateAuthSetting  `json:"auth"`
 	Mail         MailSetting         `json:"mail"`
 	CloudStorage CloudStorageSetting `json:"cloudStorage"`
+	Stripe       StripeSetting       `json:"stripe"`
+	KYC          KYCSetting          `json:"kyc"`
+}
+
+type StripeSetting struct {
+	Enabled       bool   `json:"enabled"`
+	SecretKey     string `json:"secretKey"`
+	WebhookSecret string `json:"webhookSecret"`
+	SuccessURL    string `json:"successUrl"`
+	CancelURL     string `json:"cancelUrl"`
+}
+
+type KYCSetting struct {
+	Enabled                     bool   `json:"enabled"`
+	Provider                    string `json:"provider"`
+	DiditAPIKey                 string `json:"diditApiKey"`
+	DiditWebhookSecret          string `json:"diditWebhookSecret"`
+	WorkflowID                  string `json:"workflowId"`
+	CallbackURL                 string `json:"callbackUrl"`
+	RewardCredits               int    `json:"rewardCredits"`
+	RewardWorkflowCreateCredits int    `json:"rewardWorkflowCreateCredits"`
+	RewardOnce                  bool   `json:"rewardOnce"`
 }
 
 // CloudStorageSetting 云存储配置。Cloudflare R2 通过 S3-compatible endpoint 访问。

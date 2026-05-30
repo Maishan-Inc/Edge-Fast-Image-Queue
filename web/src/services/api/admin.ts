@@ -1,5 +1,6 @@
 import { apiDelete, apiGet, apiPost, compactApiParams } from "@/services/api/request";
 import type { Prompt, PromptListResponse } from "@/services/api/prompts";
+import type { Plan } from "@/services/api/billing";
 
 export type AdminPromptCategory = {
     category: string;
@@ -165,6 +166,14 @@ export async function deleteAdminAsset(token: string, id: string) {
     return apiDelete<boolean>(`/api/admin/assets/${encodeURIComponent(id)}`, token);
 }
 
+export async function fetchAdminPlans(token: string) {
+    return apiGet<Plan[]>("/api/admin/plans", undefined, token);
+}
+
+export async function saveAdminPlan(token: string, plan: Partial<Plan>) {
+    return apiPost<Plan>("/api/admin/plans", plan, token);
+}
+
 export type AdminModelChannel = {
     protocol: "openai";
     name: string;
@@ -184,7 +193,6 @@ export type AdminPublicModelChannelSettings = {
     defaultVideoModel: string;
     defaultTextModel: string;
     systemPrompt: string;
-    allowCustomChannel: boolean;
 };
 
 export type AdminModelCost = {
@@ -244,6 +252,28 @@ export type AdminPrivateSettings = {
     };
     mail: AdminMailSettings;
     cloudStorage: AdminCloudStorageSettings;
+    stripe: AdminStripeSettings;
+    kyc: AdminKycSettings;
+};
+
+export type AdminStripeSettings = {
+    enabled: boolean;
+    secretKey: string;
+    webhookSecret: string;
+    successUrl: string;
+    cancelUrl: string;
+};
+
+export type AdminKycSettings = {
+    enabled: boolean;
+    provider: "didit";
+    diditApiKey: string;
+    diditWebhookSecret: string;
+    workflowId: string;
+    callbackUrl: string;
+    rewardCredits: number;
+    rewardWorkflowCreateCredits: number;
+    rewardOnce: boolean;
 };
 
 export type AdminCloudStorageSettings = {

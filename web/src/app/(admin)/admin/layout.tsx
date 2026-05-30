@@ -1,6 +1,6 @@
 "use client";
 
-import { DatabaseOutlined, FileTextOutlined, HomeOutlined, LogoutOutlined, PictureOutlined, SettingOutlined, TransactionOutlined, UserOutlined } from "@ant-design/icons";
+import { DatabaseOutlined, FileTextOutlined, HomeOutlined, LogoutOutlined, PictureOutlined, ShoppingOutlined, SettingOutlined, TransactionOutlined, UserOutlined } from "@ant-design/icons";
 import { Button, Flex, Layout, Menu, Typography, theme } from "antd";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -14,6 +14,7 @@ import { useUserStore } from "@/stores/use-user-store";
 const adminMenus = [
     { key: "/admin/users", icon: <UserOutlined />, label: "用户管理" },
     { key: "/admin/credit-logs", icon: <TransactionOutlined />, label: "算力点日志" },
+    { key: "/admin/plans", icon: <ShoppingOutlined />, label: "套餐管理" },
     { key: "/admin/prompts", icon: <FileTextOutlined />, label: "提示词管理" },
     { key: "/admin/assets", icon: <PictureOutlined />, label: "素材库" },
     { key: "/admin/database", icon: <DatabaseOutlined />, label: "数据库配置" },
@@ -28,20 +29,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     const user = useUserStore((state) => state.user);
     const isReady = useUserStore((state) => state.isReady);
     const logout = useUserStore((state) => state.clearSession);
-    const activeKey = pathname.startsWith("/admin/settings")
-        ? "/admin/settings"
-        : pathname.startsWith("/admin/database")
-          ? "/admin/database"
-          : pathname.startsWith("/admin/assets")
-            ? "/admin/assets"
-            : pathname.startsWith("/admin/prompts")
-              ? "/admin/prompts"
-              : pathname.startsWith("/admin/credit-logs")
-                ? "/admin/credit-logs"
-                : pathname.startsWith("/admin/users")
-                  ? "/admin/users"
-                  : "";
-    const pageTitle = pathname.startsWith("/admin/settings") ? "系统设置" : pathname.startsWith("/admin/database") ? "数据库配置" : pathname.startsWith("/admin/assets") ? "素材库管理" : pathname.startsWith("/admin/prompts") ? "提示词管理" : pathname.startsWith("/admin/credit-logs") ? "算力点日志" : "用户管理";
+    const activeKey = adminMenus.find((item) => pathname.startsWith(item.key))?.key || "";
+    const pageTitle = pathname.startsWith("/admin/settings") ? "系统设置" : pathname.startsWith("/admin/database") ? "数据库配置" : pathname.startsWith("/admin/assets") ? "素材库管理" : pathname.startsWith("/admin/prompts") ? "提示词管理" : pathname.startsWith("/admin/plans") ? "套餐管理" : pathname.startsWith("/admin/credit-logs") ? "算力点日志" : "用户管理";
 
     useEffect(() => {
         if (!isReady) return;
@@ -102,7 +91,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         {pageTitle}
                     </Typography.Title>
                     <Flex align="center" gap={4}>
-                        <UserStatusActions showConfig={false} />
+                        <UserStatusActions />
                     </Flex>
                 </Layout.Header>
                 <Layout.Content style={{ minHeight: 0, overflow: "auto" }}>{children}</Layout.Content>

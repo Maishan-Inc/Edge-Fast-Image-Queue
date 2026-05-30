@@ -1,6 +1,6 @@
 import axios from "axios";
 
-import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
+import type { AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -23,6 +23,7 @@ export type ImageApiResult = {
     id: string;
     dataUrl: string;
     storageKey?: string;
+    cloudFileId?: string;
     bytes?: number;
     mimeType?: string;
     expiresAt?: string;
@@ -102,6 +103,7 @@ function parseImagePayload(payload: ImageApiResponse): ImageApiResult[] {
                     id: nanoid(),
                     dataUrl,
                     storageKey: typeof item.storage_key === "string" ? item.storage_key : undefined,
+                    cloudFileId: typeof item.cloud_file_id === "string" ? item.cloud_file_id : undefined,
                     bytes: typeof item.size === "number" ? item.size : undefined,
                     mimeType: typeof item.content_type === "string" ? item.content_type : undefined,
                     expiresAt: typeof item.expires_at === "string" ? item.expires_at : undefined,
@@ -143,25 +145,20 @@ function withSystemPrompt(config: AiConfig, prompt: string) {
     return systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
 }
 
-function aiApiUrl(config: AiConfig, path: string) {
-    return config.channelMode === "remote" ? `/api/v1${path}` : buildApiUrl(config.baseUrl, path);
+function aiApiUrl(_config: AiConfig, path: string) {
+    return `/api/v1${path}`;
 }
 
-function aiHeaders(config: AiConfig, contentType?: string) {
+function aiHeaders(_config: AiConfig, contentType?: string) {
     const token = useUserStore.getState().token;
-    return config.channelMode === "remote"
-        ? {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              ...(contentType ? { "Content-Type": contentType } : {}),
-          }
-        : {
-              Authorization: `Bearer ${config.apiKey}`,
-              ...(contentType ? { "Content-Type": contentType } : {}),
-          };
+    return {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(contentType ? { "Content-Type": contentType } : {}),
+    };
 }
 
-function refreshRemoteUser(config: AiConfig) {
-    if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
+function refreshRemoteUser(_config: AiConfig) {
+    void useUserStore.getState().hydrateUser();
 }
 
 function withSystemMessage(config: AiConfig, messages: ChatCompletionMessage[]) {
@@ -284,21 +281,4 @@ export async function requestImageQuestion(config: AiConfig, messages: ChatCompl
     }
     refreshRemoteUser(config);
     return answer || "没有返回内容";
-}
-
-export async function fetchImageModels(config: AiConfig) {
-    if (config.channelMode === "remote") return config.models;
-    try {
-        const response = await axios.get<{ data?: Array<{ id?: string }>; error?: { message?: string } }>(buildApiUrl(config.baseUrl, "/models"), {
-            headers: {
-                Authorization: `Bearer ${config.apiKey}`,
-            },
-        });
-        return (response.data.data || [])
-            .map((model) => model.id)
-            .filter((id): id is string => Boolean(id))
-            .sort((a, b) => a.localeCompare(b));
-    } catch (error) {
-        throw new Error(readAxiosError(error, "读取模型失败"));
-    }
 }
