@@ -4,7 +4,7 @@ import { CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from "@ant-d
 import { App, Button, Card, Flex, Space, Table, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
 
-import { fetchDatabaseStatus, updateDatabase, type AdminDatabaseStatus } from "@/services/api/admin";
+import { fetchDatabaseStatus, type AdminDatabaseStatus } from "@/services/api/admin";
 import { useUserStore } from "@/stores/use-user-store";
 
 export default function AdminDatabasePage() {
@@ -12,7 +12,6 @@ export default function AdminDatabasePage() {
     const { message } = App.useApp();
     const [status, setStatus] = useState<AdminDatabaseStatus | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [isUpdating, setIsUpdating] = useState(false);
 
     const loadStatus = async () => {
         if (!token) return;
@@ -23,20 +22,6 @@ export default function AdminDatabasePage() {
             message.error(error instanceof Error ? error.message : "读取数据库状态失败");
         } finally {
             setIsLoading(false);
-        }
-    };
-
-    const runUpdate = async () => {
-        if (!token) return;
-        setIsUpdating(true);
-        try {
-            await updateDatabase(token);
-            message.success("数据库已更新");
-            await loadStatus();
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "数据库更新失败");
-        } finally {
-            setIsUpdating(false);
         }
     };
 
@@ -53,14 +38,11 @@ export default function AdminDatabasePage() {
                             <Typography.Title level={4} style={{ margin: 0 }}>
                                 数据库配置
                             </Typography.Title>
-                            <Typography.Text type="secondary">查看当前数据库结构是否完整，并记录每一次数据库更新执行来源。</Typography.Text>
+                            <Typography.Text type="secondary">数据库会在服务启动时自动更新；这里仅查看当前结构和启动更新记录。</Typography.Text>
                         </div>
                         <Space>
                             <Button icon={<ReloadOutlined />} loading={isLoading} onClick={() => void loadStatus()}>
                                 刷新
-                            </Button>
-                            <Button type="primary" loading={isUpdating} onClick={() => void runUpdate()}>
-                                更新数据库
                             </Button>
                         </Space>
                     </Flex>

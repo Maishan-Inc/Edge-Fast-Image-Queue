@@ -78,6 +78,10 @@ func AdminUpdateDatabase() error {
 	return repository.UpdateDatabase()
 }
 
+func EnsureDatabaseUpdated() error {
+	return repository.UpdateDatabase()
+}
+
 func AdminDatabaseStatus() (model.DatabaseStatus, error) {
 	return repository.DatabaseStatus()
 }
