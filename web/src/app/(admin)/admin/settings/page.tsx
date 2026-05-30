@@ -1,13 +1,14 @@
 "use client";
 
-import { CheckCircleOutlined, DeleteOutlined, FormatPainterOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import { CheckCircleOutlined, DeleteOutlined, EditOutlined, FormatPainterOutlined, LoadingOutlined, MailOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { json } from "@codemirror/lang-json";
 import { App, Button, Card, Checkbox, Col, Drawer, Flex, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { EditorView } from "@uiw/react-codemirror";
 
-import { fetchAdminSettings, fetchChannelModels, saveAdminSettings, testChannelModel, updateDatabase, type AdminModelChannel, type AdminModelCost, type AdminPrivateAuthProvider, type AdminPublicAuthProvider, type AdminSettings } from "@/services/api/admin";
+import { fetchAdminSettings, fetchChannelModels, saveAdminSettings, testChannelModel, testCloudStorage, testMailSettings, updateDatabase, type AdminCloudStorageSettings, type AdminModelChannel, type AdminModelCost, type AdminPrivateAuthProvider, type AdminPublicAuthProvider, type AdminSettings } from "@/services/api/admin";
+import { useI18n } from "@/hooks/use-i18n";
 import { useUserStore } from "@/stores/use-user-store";
 
 const CodeMirror = dynamic(() => import("@uiw/react-codemirror"), { ssr: false });
@@ -43,9 +44,9 @@ const emptySettings: AdminSettings = {
             allowRegister: true,
             emailVerification: false,
             linuxDo: emptyPublicProvider("linux-do", "Linux.do", "/icons/linuxdo.svg"),
-            google: emptyPublicProvider("google", "Google"),
-            github: emptyPublicProvider("github", "GitHub"),
-            metamask: emptyPublicProvider("metamask", "MetaMask"),
+            google: emptyPublicProvider("google", "Google", "/icons/google.svg"),
+            github: emptyPublicProvider("github", "GitHub", "/icons/github.svg"),
+            metamask: emptyPublicProvider("metamask", "MetaMask", "/icons/metamask.svg"),
             customProviders: [emptyPublicProvider("o2", "O2")],
         },
     },
@@ -54,8 +55,8 @@ const emptySettings: AdminSettings = {
         promptSync: { enabled: true, cron: "*/5 * * * *" },
         auth: {
             linuxDo: emptyPrivateProvider("linux-do", "Linux.do", "/icons/linuxdo.svg"),
-            google: emptyPrivateProvider("google", "Google"),
-            github: emptyPrivateProvider("github", "GitHub"),
+            google: emptyPrivateProvider("google", "Google", "/icons/google.svg"),
+            github: emptyPrivateProvider("github", "GitHub", "/icons/github.svg"),
             metamask: { enabled: false },
             customProviders: [emptyPrivateProvider("o2", "O2")],
         },
@@ -69,22 +70,40 @@ const emptySettings: AdminSettings = {
             fromName: "",
             codeExpireMin: 10,
             templates: {
-                register: { subject: "注册验证码：{{code}}", body: "你的注册验证码是 {{code}}，{{expireMinutes}} 分钟内有效。" },
-                reset: { subject: "找回密码验证码：{{code}}", body: "你的找回密码验证码是 {{code}}，{{expireMinutes}} 分钟内有效。" },
-                metamask: { subject: "MetaMask 登录邮箱验证码：{{code}}", body: "你的 MetaMask 登录邮箱验证码是 {{code}}，{{expireMinutes}} 分钟内有效。" },
+                register: { subject: "注册验证码：{{code}}", body: "你的注册验证码是 {{code}}，{{expireMinutes}} 分钟内有效。\n请求 IP：{{ip}}\n国家/地区：{{country}} {{region}}" },
+                reset: { subject: "找回密码验证码：{{code}}", body: "你的找回密码验证码是 {{code}}，{{expireMinutes}} 分钟内有效。\n请求 IP：{{ip}}\n国家/地区：{{country}} {{region}}" },
+                metamask: { subject: "MetaMask 登录邮箱验证码：{{code}}", body: "你的 MetaMask 登录邮箱验证码是 {{code}}，{{expireMinutes}} 分钟内有效。\n请求 IP：{{ip}}\n国家/地区：{{country}} {{region}}" },
             },
+        },
+        cloudStorage: {
+            enabled: false,
+            provider: "r2",
+            endpoint: "",
+            region: "auto",
+            accessKeyId: "",
+            secretAccessKey: "",
+            bucket: "",
+            publicBaseUrl: "",
+            imagePathTemplate: "{username}/images/{yyyy}/{mm}/{dd}/{filename}",
+            videoPathTemplate: "{username}/videos/{yyyy}/{mm}/{dd}/{filename}",
+            imageExpireDays: 7,
+            videoExpireDays: 7,
+            autoCleanupEnabled: true,
+            pathStyleEndpoint: true,
         },
     },
 };
 const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, enabled: true, remark: "" };
 
-type SettingsTabKey = "public" | "private" | "mail" | "thirdParty";
+type SettingsTabKey = "public" | "private" | "mail" | "thirdParty" | "cloudStorage";
 type EditorMode = "visual" | "json";
 type ModelSelectTabKey = "new" | "current";
+type MailTemplateKey = "register" | "reset" | "metamask";
 
 export default function AdminSettingsPage() {
     const token = useUserStore((state) => state.token);
     const { message } = App.useApp();
+    const { t } = useI18n();
     const [form] = Form.useForm<AdminSettings>();
     const [activeTab, setActiveTab] = useState<SettingsTabKey>("public");
     const [editorMode, setEditorMode] = useState<Record<string, EditorMode>>({ public: "visual", private: "visual" });
@@ -109,12 +128,16 @@ export default function AdminSettingsPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isUpdatingDatabase, setIsUpdatingDatabase] = useState(false);
+    const [isTestingCloudStorage, setIsTestingCloudStorage] = useState(false);
+    const [isSendingTestMail, setIsSendingTestMail] = useState(false);
+    const [mailTestEmail, setMailTestEmail] = useState("");
+    const [editingMailTemplate, setEditingMailTemplate] = useState<MailTemplateKey | null>(null);
     const [modelCosts, setModelCosts] = useState<AdminModelCost[]>([]);
     const [knownModels, setKnownModels] = useState<string[]>([]);
     const publicModels = Form.useWatch(["public", "modelChannel", "availableModels"], form) || [];
     const channelModels = useMemo(() => collectChannelModels(channels), [channels]);
     const channelTableData = useMemo(() => channels.map((channel, index) => ({ ...channel, _index: index, _rowKey: `${index}-${channel.name}-${channel.baseUrl}` })), [channels]);
-    const activeMode = activeTab === "mail" || activeTab === "thirdParty" ? "visual" : editorMode[activeTab];
+    const activeMode = activeTab === "mail" || activeTab === "thirdParty" || activeTab === "cloudStorage" ? "visual" : editorMode[activeTab];
     const activeJsonText = jsonText[activeTab] || "";
     const jsonError = activeMode === "json" ? getJsonError(activeJsonText) : "";
     const modelSelectGroups = useMemo(() => buildModelSelectGroups(modelSelectSource, modelSelectExisting), [modelSelectSource, modelSelectExisting]);
@@ -161,7 +184,7 @@ export default function AdminSettingsPage() {
         setIsSaving(true);
         try {
             const saved = normalizeSettings(await saveAdminSettings(token, values));
-            const merged = mergeChannelApiKeys(values.private.channels, saved);
+            const merged = mergeSavedSecrets(values, saved);
             form.setFieldsValue(merged);
             setChannels(merged.private.channels);
             setModelCosts(merged.public.modelChannel.modelCosts);
@@ -188,6 +211,39 @@ export default function AdminSettingsPage() {
             message.error(error instanceof Error ? error.message : "数据库更新失败");
         } finally {
             setIsUpdatingDatabase(false);
+        }
+    };
+
+    const sendTestMail = async () => {
+        if (!token) return;
+        const email = mailTestEmail.trim();
+        if (!email) {
+            message.warning("请填写测试收件邮箱");
+            return;
+        }
+        setIsSendingTestMail(true);
+        try {
+            const mail = normalizePrivateSetting(form.getFieldValue(["private"]) as Partial<AdminSettings["private"]>).mail;
+            await testMailSettings(token, mail, email);
+            message.success("测试邮件已发送");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "测试邮件发送失败");
+        } finally {
+            setIsSendingTestMail(false);
+        }
+    };
+
+    const testCurrentCloudStorage = async () => {
+        if (!token) return;
+        const setting = normalizeCloudStorageSetting(form.getFieldValue(["private", "cloudStorage"]) as Partial<AdminCloudStorageSettings>);
+        setIsTestingCloudStorage(true);
+        try {
+            await testCloudStorage(token, setting);
+            message.success(t("cloud.test.success"));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : t("cloud.test.error"));
+        } finally {
+            setIsTestingCloudStorage(false);
         }
     };
 
@@ -393,7 +449,7 @@ export default function AdminSettingsPage() {
             private: { ...values.private, channels: nextChannels },
         });
         const saved = normalizeSettings(await saveAdminSettings(token, nextSettings));
-        const merged = mergeChannelApiKeys(nextChannels, saved);
+        const merged = mergeSavedSecrets(nextSettings, saved);
         setChannels(merged.private.channels);
         setModelCosts(merged.public.modelChannel.modelCosts);
         rememberKnownModels(merged);
@@ -416,6 +472,7 @@ export default function AdminSettingsPage() {
                             items={[
                                 { key: "public", label: "公开配置（对外暴露）" },
                                 { key: "private", label: "私有配置（不会对外暴露）" },
+                                { key: "cloudStorage", label: t("cloud.tab") },
                                 { key: "mail", label: "邮件配置" },
                                 { key: "thirdParty", label: "第三方登录" },
                             ]}
@@ -446,7 +503,7 @@ export default function AdminSettingsPage() {
                                 ]}
                             />
                         ) : (
-                            <Typography.Text type="secondary">{activeTab === "mail" ? "SMTP 验证码和邮件模板" : "OAuth、MetaMask 和自定义登录入口"}</Typography.Text>
+                            <Typography.Text type="secondary">{activeTab === "mail" ? "SMTP 验证码和邮件模板" : activeTab === "cloudStorage" ? t("cloud.description") : "OAuth、MetaMask 和自定义登录入口"}</Typography.Text>
                         )}
                         {activeMode === "json" ? (
                             <Space>
@@ -558,65 +615,173 @@ export default function AdminSettingsPage() {
                                 />
                             </div>
                         )
+                    ) : activeTab === "cloudStorage" ? (
+                        <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false}>
+                            <Card
+                                size="small"
+                                title={t("cloud.tab")}
+                                extra={
+                                    <Button loading={isTestingCloudStorage} onClick={() => void testCurrentCloudStorage()}>
+                                        {t("cloud.test")}
+                                    </Button>
+                                }
+                            >
+                                <Row gutter={16}>
+                                    <Col xs={24} md={8}>
+                                        <Form.Item name={["private", "cloudStorage", "enabled"]} label={t("cloud.enabled")} extra={t("cloud.enabled.extra")} valuePropName="checked">
+                                            <Switch />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={8}>
+                                        <Form.Item name={["private", "cloudStorage", "provider"]} label={t("cloud.provider")}>
+                                            <Select
+                                                options={[
+                                                    { label: "Cloudflare R2", value: "r2" },
+                                                    { label: "S3", value: "s3" },
+                                                ]}
+                                            />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={8}>
+                                        <Form.Item name={["private", "cloudStorage", "region"]} label={t("cloud.region")}>
+                                            <Input placeholder="auto" />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={12}>
+                                        <Form.Item name={["private", "cloudStorage", "endpoint"]} label={t("cloud.endpoint")} extra={t("cloud.endpoint.extra")}>
+                                            <Input placeholder="https://<accountid>.r2.cloudflarestorage.com" />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={12}>
+                                        <Form.Item name={["private", "cloudStorage", "publicBaseUrl"]} label={t("cloud.publicBaseUrl")} extra={t("cloud.publicBaseUrl.extra")}>
+                                            <Input placeholder="https://cdn.example.com" />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={8}>
+                                        <Form.Item name={["private", "cloudStorage", "accessKeyId"]} label={t("cloud.accessKeyId")}>
+                                            <Input />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={8}>
+                                        <Form.Item name={["private", "cloudStorage", "secretAccessKey"]} label={t("cloud.secretAccessKey")} extra={t("cloud.saveHint")}>
+                                            <Input.Password placeholder={t("cloud.secretAccessKey.placeholder")} />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={8}>
+                                        <Form.Item name={["private", "cloudStorage", "bucket"]} label={t("cloud.bucket")} extra={t("cloud.bucket.extra")}>
+                                            <Input />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={12}>
+                                        <Form.Item name={["private", "cloudStorage", "imagePathTemplate"]} label={t("cloud.imagePathTemplate")} extra={t("cloud.imagePathTemplate.extra")}>
+                                            <Input />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={12}>
+                                        <Form.Item name={["private", "cloudStorage", "videoPathTemplate"]} label={t("cloud.videoPathTemplate")} extra={t("cloud.videoPathTemplate.extra")}>
+                                            <Input />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={6}>
+                                        <Form.Item name={["private", "cloudStorage", "imageExpireDays"]} label={t("cloud.imageExpireDays")} extra={t("cloud.expire.extra")}>
+                                            <InputNumber min={1} max={3650} precision={0} addonAfter="天" className="!w-full" />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={6}>
+                                        <Form.Item name={["private", "cloudStorage", "videoExpireDays"]} label={t("cloud.videoExpireDays")} extra={t("cloud.expire.extra")}>
+                                            <InputNumber min={1} max={3650} precision={0} addonAfter="天" className="!w-full" />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={6}>
+                                        <Form.Item name={["private", "cloudStorage", "autoCleanupEnabled"]} label={t("cloud.autoCleanup")} extra={t("cloud.autoCleanup.extra")} valuePropName="checked">
+                                            <Switch />
+                                        </Form.Item>
+                                    </Col>
+                                    <Col xs={24} md={6}>
+                                        <Form.Item name={["private", "cloudStorage", "pathStyleEndpoint"]} label={t("cloud.pathStyle")} extra={t("cloud.pathStyle.extra")} valuePropName="checked">
+                                            <Switch />
+                                        </Form.Item>
+                                    </Col>
+                                </Row>
+                            </Card>
+                        </Form>
                     ) : activeTab === "mail" ? (
                         <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false}>
-                            <Flex vertical gap={12}>
-                                <Card size="small" title="SMTP 验证码">
-                                    <Row gutter={16}>
-                                        <Col xs={24} md={6}>
-                                            <Form.Item name={["private", "mail", "enabled"]} label="开启邮件服务" valuePropName="checked">
-                                                <Switch />
-                                            </Form.Item>
-                                        </Col>
-                                        <Col xs={24} md={10}>
-                                            <Form.Item name={["private", "mail", "host"]} label="SMTP Host">
-                                                <Input placeholder="smtp.example.com" />
-                                            </Form.Item>
-                                        </Col>
-                                        <Col xs={24} md={4}>
-                                            <Form.Item name={["private", "mail", "port"]} label="端口">
-                                                <InputNumber min={1} max={65535} className="!w-full" />
-                                            </Form.Item>
-                                        </Col>
-                                        <Col xs={24} md={4}>
-                                            <Form.Item name={["private", "mail", "codeExpireMin"]} label="有效分钟">
-                                                <InputNumber min={1} max={60} className="!w-full" />
-                                            </Form.Item>
-                                        </Col>
-                                        <Col xs={24} md={8}>
-                                            <Form.Item name={["private", "mail", "username"]} label="SMTP 用户名">
-                                                <Input />
-                                            </Form.Item>
-                                        </Col>
-                                        <Col xs={24} md={8}>
-                                            <Form.Item name={["private", "mail", "password"]} label="SMTP 密码">
-                                                <Input.Password placeholder="留空则沿用已保存的密码" />
-                                            </Form.Item>
-                                        </Col>
-                                        <Col xs={24} md={4}>
-                                            <Form.Item name={["private", "mail", "fromName"]} label="发件名称">
-                                                <Input placeholder="边缘幻星" />
-                                            </Form.Item>
-                                        </Col>
-                                        <Col xs={24} md={4}>
-                                            <Form.Item name={["private", "mail", "fromEmail"]} label="发件邮箱">
-                                                <Input placeholder="noreply@example.com" />
-                                            </Form.Item>
-                                        </Col>
+                            <Row gutter={[16, 16]}>
+                                <Col xs={24} lg={12}>
+                                    <Card size="small" title="SMTP 验证码配置">
+                                        <Row gutter={16}>
+                                            <Col xs={24} md={8}>
+                                                <Form.Item name={["private", "mail", "enabled"]} label="开启邮件服务" valuePropName="checked">
+                                                    <Switch />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={16}>
+                                                <Form.Item name={["private", "mail", "host"]} label="SMTP Host">
+                                                    <Input placeholder="smtp.example.com" />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={8}>
+                                                <Form.Item name={["private", "mail", "port"]} label="端口">
+                                                    <InputNumber min={1} max={65535} className="!w-full" />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={8}>
+                                                <Form.Item name={["private", "mail", "codeExpireMin"]} label="有效分钟">
+                                                    <InputNumber min={1} max={60} className="!w-full" />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={12}>
+                                                <Form.Item name={["private", "mail", "username"]} label="SMTP 用户名">
+                                                    <Input />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={12}>
+                                                <Form.Item name={["private", "mail", "password"]} label="SMTP 密码">
+                                                    <Input.Password placeholder="留空则沿用已保存的密码" />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={12}>
+                                                <Form.Item name={["private", "mail", "fromName"]} label="发件名称">
+                                                    <Input placeholder="边缘幻星" />
+                                                </Form.Item>
+                                            </Col>
+                                            <Col xs={24} md={12}>
+                                                <Form.Item name={["private", "mail", "fromEmail"]} label="发件邮箱">
+                                                    <Input placeholder="noreply@example.com" />
+                                                </Form.Item>
+                                            </Col>
                                     </Row>
-                                </Card>
-                                <MailTemplateEditor form={form} name="register" title="绑定邮箱注册模板" />
-                                <MailTemplateEditor form={form} name="reset" title="找回密码模板" />
-                                <MailTemplateEditor form={form} name="metamask" title="MetaMask 邮箱验证模板" />
-                            </Flex>
+                                        <div style={{ marginTop: 8, borderTop: "1px solid var(--ant-color-border-secondary)", paddingTop: 16 }}>
+                                            <Typography.Text strong>测试发送</Typography.Text>
+                                            <Space.Compact style={{ width: "100%", marginTop: 8 }}>
+                                                <Input value={mailTestEmail} onChange={(event) => setMailTestEmail(event.target.value)} placeholder="填写测试收件邮箱" />
+                                                <Button type="primary" icon={<MailOutlined />} loading={isSendingTestMail} onClick={() => void sendTestMail()}>
+                                                    发送
+                                                </Button>
+                                            </Space.Compact>
+                                            <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
+                                                测试会使用当前表单中的 SMTP 配置和“绑定邮箱注册模板”发送验证码示例 123456。
+                                            </Typography.Paragraph>
+                                        </div>
+                                    </Card>
+                                </Col>
+                                <Col xs={24} lg={12}>
+                                    <Flex vertical gap={12}>
+                                        <MailTemplateBlock form={form} name="register" title="绑定邮箱注册模板" onEdit={setEditingMailTemplate} />
+                                        <MailTemplateBlock form={form} name="reset" title="找回密码模板" onEdit={setEditingMailTemplate} />
+                                        <MailTemplateBlock form={form} name="metamask" title="MetaMask 邮箱验证模板" onEdit={setEditingMailTemplate} />
+                                    </Flex>
+                                </Col>
+                            </Row>
                         </Form>
                     ) : activeTab === "thirdParty" ? (
                         <Form form={form} layout="vertical" initialValues={emptySettings} requiredMark={false}>
                             <Flex vertical gap={12}>
                                 <OAuthProviderCard providerKey="linuxDo" title="Linux.do 登录" iconUrl="/icons/linuxdo.svg" />
-                                <OAuthProviderCard providerKey="google" title="Google 登录" />
-                                <OAuthProviderCard providerKey="github" title="GitHub 登录" />
-                                <Card size="small" title="MetaMask 登录">
+                                <OAuthProviderCard providerKey="google" title="Google 登录" iconUrl="/icons/google.svg" />
+                                <OAuthProviderCard providerKey="github" title="GitHub 登录" iconUrl="/icons/github.svg" />
+                                <Card size="small" title={<ProviderTitle title="MetaMask 登录" iconUrl="/icons/metamask.svg" />}>
                                     <Row gutter={16}>
                                         <Col xs={24} md={8}>
                                             <Form.Item name={["public", "auth", "metamask", "enabled"]} label="开启 MetaMask 登录" valuePropName="checked">
@@ -782,6 +947,7 @@ export default function AdminSettingsPage() {
                         </div>
                     )}
                 </Card>
+                <MailTemplateEditorModal form={form} name={editingMailTemplate} onClose={() => setEditingMailTemplate(null)} />
                 <Drawer
                     title={editingChannelIndex === null ? "新增渠道" : "编辑渠道"}
                     open={isChannelDrawerOpen}
@@ -989,41 +1155,86 @@ export default function AdminSettingsPage() {
     );
 }
 
-function MailTemplateEditor({ form, name, title }: { form: any; name: "register" | "reset" | "metamask"; title: string }) {
+function MailTemplateBlock({ form, name, title, onEdit }: { form: any; name: MailTemplateKey; title: string; onEdit: (name: MailTemplateKey) => void }) {
     const subject = Form.useWatch(["private", "mail", "templates", name, "subject"], form) || "";
     const body = Form.useWatch(["private", "mail", "templates", name, "body"], form) || "";
     const expireMinutes = Form.useWatch(["private", "mail", "codeExpireMin"], form) || 10;
-    const preview = renderTemplatePreview(`${subject}\n\n${body}`, expireMinutes);
     return (
-        <Card size="small" title={title}>
-            <Row gutter={16}>
-                <Col xs={24} md={12}>
-                    <Form.Item name={["private", "mail", "templates", name, "subject"]} label="标题">
-                        <Input />
-                    </Form.Item>
-                    <Form.Item name={["private", "mail", "templates", name, "body"]} label="正文模板" extra="可用变量：{{code}}、{{email}}、{{expireMinutes}}、{{siteName}}">
-                        <Input.TextArea rows={5} />
-                    </Form.Item>
-                </Col>
-                <Col xs={24} md={12}>
-                    <Typography.Text strong>预览</Typography.Text>
-                    <pre style={{ marginTop: 8, minHeight: 154, whiteSpace: "pre-wrap", wordBreak: "break-word", border: "1px solid var(--ant-color-border)", borderRadius: 6, padding: 12, background: "var(--ant-color-fill-quaternary)" }}>{preview}</pre>
-                </Col>
-            </Row>
+        <Card
+            size="small"
+            title={title}
+            extra={
+                <Button size="small" icon={<EditOutlined />} onClick={() => onEdit(name)}>
+                    编辑模板
+                </Button>
+            }
+        >
+            <Flex vertical gap={8}>
+                <Typography.Text strong ellipsis>
+                    {subject || "未配置标题"}
+                </Typography.Text>
+                <Typography.Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
+                    {body || "未配置正文模板"}
+                </Typography.Paragraph>
+                <Space size={[6, 6]} wrap>
+                    {mailTemplateVariables.map((item) => (
+                        <Tag key={item}>{item}</Tag>
+                    ))}
+                </Space>
+                <Typography.Text type="secondary">当前预览验证码有效期：{expireMinutes} 分钟</Typography.Text>
+            </Flex>
         </Card>
     );
 }
+
+function MailTemplateEditorModal({ form, name, onClose }: { form: any; name: MailTemplateKey | null; onClose: () => void }) {
+    const activeName = name || "register";
+    const title = mailTemplateTitles[activeName];
+    const subject = Form.useWatch(["private", "mail", "templates", activeName, "subject"], form) || "";
+    const body = Form.useWatch(["private", "mail", "templates", activeName, "body"], form) || "";
+    const expireMinutes = Form.useWatch(["private", "mail", "codeExpireMin"], form) || 10;
+    const preview = renderTemplatePreview(`${subject}\n\n${body}`, expireMinutes);
+    const setTemplateField = (field: "subject" | "body", value: string) => {
+        form.setFieldValue(["private", "mail", "templates", activeName, field], value);
+    };
+    return (
+        <Modal title={title} open={!!name} width={1120} onCancel={onClose} footer={<Button type="primary" onClick={onClose}>完成</Button>} destroyOnHidden>
+            <Row gutter={16}>
+                <Col xs={24} lg={12}>
+                    <Flex vertical gap={12}>
+                        <div>
+                            <Typography.Text strong>标题</Typography.Text>
+                            <Input value={subject} onChange={(event) => setTemplateField("subject", event.target.value)} style={{ marginTop: 8 }} />
+                        </div>
+                        <div>
+                            <Typography.Text strong>正文模板</Typography.Text>
+                            <Input.TextArea value={body} onChange={(event) => setTemplateField("body", event.target.value)} rows={17} style={{ marginTop: 8, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" }} />
+                        </div>
+                        <Typography.Text type="secondary">可用变量：{mailTemplateVariables.join("、")}</Typography.Text>
+                    </Flex>
+                </Col>
+                <Col xs={24} lg={12}>
+                    <Typography.Text strong>实时预览</Typography.Text>
+                    <pre style={{ marginTop: 8, minHeight: 468, whiteSpace: "pre-wrap", wordBreak: "break-word", border: "1px solid var(--ant-color-border)", borderRadius: 6, padding: 12, background: "var(--ant-color-fill-quaternary)" }}>{preview}</pre>
+                </Col>
+            </Row>
+        </Modal>
+    );
+}
+
+const mailTemplateTitles: Record<MailTemplateKey, string> = {
+    register: "绑定邮箱注册模板",
+    reset: "找回密码模板",
+    metamask: "MetaMask 邮箱验证模板",
+};
+
+const mailTemplateVariables = ["{{code}}", "{{email}}", "{{expireMinutes}}", "{{siteName}}", "{{ip}}", "{{country}}", "{{region}}"];
 
 function OAuthProviderCard({ providerKey, title, iconUrl }: { providerKey: "linuxDo" | "google" | "github"; title: string; iconUrl?: string }) {
     return (
         <Card
             size="small"
-            title={
-                <Space>
-                    {iconUrl ? <img src={iconUrl} alt="" width={18} height={18} /> : null}
-                    {title}
-                </Space>
-            }
+            title={<ProviderTitle title={title} iconUrl={iconUrl} />}
         >
             <Row gutter={16}>
                 <Col xs={24} md={4}>
@@ -1071,12 +1282,24 @@ function OAuthProviderCard({ providerKey, title, iconUrl }: { providerKey: "linu
     );
 }
 
+function ProviderTitle({ title, iconUrl }: { title: string; iconUrl?: string }) {
+    return (
+        <Space>
+            {iconUrl ? <img src={iconUrl} alt="" width={18} height={18} /> : null}
+            {title}
+        </Space>
+    );
+}
+
 function renderTemplatePreview(template: string, expireMinutes: number) {
     return template
         .replaceAll("{{code}}", "123456")
         .replaceAll("{{email}}", "user@example.com")
         .replaceAll("{{expireMinutes}}", String(expireMinutes))
-        .replaceAll("{{siteName}}", "边缘幻星");
+        .replaceAll("{{siteName}}", "边缘幻星")
+        .replaceAll("{{ip}}", "203.0.113.8")
+        .replaceAll("{{country}}", "CN")
+        .replaceAll("{{region}}", "Shanghai");
 }
 
 function normalizeSettings(settings: Partial<AdminSettings> = {}): AdminSettings {
@@ -1102,9 +1325,9 @@ function normalizePublicSetting(setting: Partial<AdminSettings["public"]> = {}):
             allowRegister: setting.auth?.allowRegister !== false,
             emailVerification: setting.auth?.emailVerification === true,
             linuxDo: normalizePublicProvider(setting.auth?.linuxDo, "linux-do", "Linux.do", "/icons/linuxdo.svg"),
-            google: normalizePublicProvider(setting.auth?.google, "google", "Google"),
-            github: normalizePublicProvider(setting.auth?.github, "github", "GitHub"),
-            metamask: normalizePublicProvider(setting.auth?.metamask, "metamask", "MetaMask"),
+            google: normalizePublicProvider(setting.auth?.google, "google", "Google", "/icons/google.svg"),
+            github: normalizePublicProvider(setting.auth?.github, "github", "GitHub", "/icons/github.svg"),
+            metamask: normalizePublicProvider(setting.auth?.metamask, "metamask", "MetaMask", "/icons/metamask.svg"),
             customProviders: (setting.auth?.customProviders?.length ? setting.auth.customProviders : [emptyPublicProvider("o2", "O2")]).map((item) => normalizePublicProvider(item, item.id || "o2", item.name || "O2")),
         },
     };
@@ -1123,8 +1346,8 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
         },
         auth: {
             linuxDo: normalizePrivateProvider(setting.auth?.linuxDo, "linux-do", "Linux.do", "/icons/linuxdo.svg"),
-            google: normalizePrivateProvider(setting.auth?.google, "google", "Google"),
-            github: normalizePrivateProvider(setting.auth?.github, "github", "GitHub"),
+            google: normalizePrivateProvider(setting.auth?.google, "google", "Google", "/icons/google.svg"),
+            github: normalizePrivateProvider(setting.auth?.github, "github", "GitHub", "/icons/github.svg"),
             metamask: { enabled: setting.auth?.metamask?.enabled === true },
             customProviders: (setting.auth?.customProviders?.length ? setting.auth.customProviders : [emptyPrivateProvider("o2", "O2")]).map((item) => normalizePrivateProvider(item, item.id || "o2", item.name || "O2")),
         },
@@ -1137,6 +1360,27 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
                 metamask: { ...emptySettings.private.mail.templates.metamask, ...(setting.mail?.templates?.metamask || {}) },
             },
         },
+        cloudStorage: normalizeCloudStorageSetting(setting.cloudStorage),
+    };
+}
+
+function normalizeCloudStorageSetting(setting: Partial<AdminCloudStorageSettings> = {}): AdminCloudStorageSettings {
+    return {
+        ...emptySettings.private.cloudStorage,
+        ...setting,
+        provider: setting.provider === "s3" ? "s3" : "r2",
+        endpoint: setting.endpoint || "",
+        region: setting.region || "auto",
+        accessKeyId: setting.accessKeyId || "",
+        secretAccessKey: setting.secretAccessKey || "",
+        bucket: setting.bucket || "",
+        publicBaseUrl: setting.publicBaseUrl || "",
+        imagePathTemplate: setting.imagePathTemplate || "{username}/images/{yyyy}/{mm}/{dd}/{filename}",
+        videoPathTemplate: setting.videoPathTemplate || "{username}/videos/{yyyy}/{mm}/{dd}/{filename}",
+        imageExpireDays: Math.max(1, Number(setting.imageExpireDays) || 7),
+        videoExpireDays: Math.max(1, Number(setting.videoExpireDays) || 7),
+        autoCleanupEnabled: setting.autoCleanupEnabled !== false,
+        pathStyleEndpoint: setting.pathStyleEndpoint !== false,
     };
 }
 
@@ -1173,14 +1417,14 @@ function setModelCost(form: any, setModelCosts: (items: AdminModelCost[]) => voi
     setModelCosts(next);
 }
 
-function mergeChannelApiKeys(currentChannels: AdminModelChannel[], saved: AdminSettings): AdminSettings {
+function mergeSavedSecrets(currentSettings: AdminSettings, saved: AdminSettings): AdminSettings {
     const channels = saved.private.channels.map((item, index) => ({
         ...item,
-        apiKey: currentChannels[index]?.apiKey || item.apiKey,
+        apiKey: currentSettings.private.channels[index]?.apiKey || item.apiKey,
     }));
     return {
         public: saved.public,
-        private: { ...saved.private, channels },
+        private: { ...saved.private, channels, cloudStorage: { ...saved.private.cloudStorage, secretAccessKey: currentSettings.private.cloudStorage.secretAccessKey || saved.private.cloudStorage.secretAccessKey } },
     };
 }
 

@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"net/smtp"
 	"net/url"
@@ -38,6 +39,12 @@ type userExtra struct {
 	Wallet    string `json:"wallet,omitempty"`
 	Message   string `json:"message,omitempty"`
 	Signature string `json:"signature,omitempty"`
+}
+
+type MailTemplateContext struct {
+	IP      string
+	Country string
+	Region  string
 }
 
 func EnsureDefaultAdmin() error {
@@ -921,7 +928,7 @@ func shortWallet(wallet string) string {
 	return wallet[:6] + wallet[len(wallet)-4:]
 }
 
-func SendEmailCode(email string, purpose string) error {
+func SendEmailCode(email string, purpose string, context MailTemplateContext) error {
 	email = strings.TrimSpace(strings.ToLower(email))
 	purpose = strings.TrimSpace(purpose)
 	if email == "" {
@@ -965,7 +972,7 @@ func SendEmailCode(email string, purpose string) error {
 	if _, err := repository.SaveEmailVerification(item); err != nil {
 		return err
 	}
-	return sendVerificationMail(settings.Private.Mail, email, purpose, code)
+	return sendVerificationMail(settings.Private.Mail, email, purpose, code, context)
 }
 
 func ResetPassword(email string, code string, password string) error {
@@ -1015,7 +1022,7 @@ func randomCode() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
-func sendVerificationMail(setting model.MailSetting, email string, purpose string, code string) error {
+func sendVerificationMail(setting model.MailSetting, email string, purpose string, code string, context MailTemplateContext) error {
 	if !setting.Enabled {
 		return safeMessageError{message: "邮件服务未开启"}
 	}
@@ -1028,8 +1035,8 @@ func sendVerificationMail(setting model.MailSetting, email string, purpose strin
 	} else if purpose == "metamask" {
 		template = setting.Templates.MetaMask
 	}
-	subject := renderMailTemplate(template.Subject, email, code, setting.CodeExpireMin)
-	body := renderMailTemplate(template.Body, email, code, setting.CodeExpireMin)
+	subject := renderMailTemplate(template.Subject, email, code, setting.CodeExpireMin, context)
+	body := renderMailTemplate(template.Body, email, code, setting.CodeExpireMin, context)
 	from := setting.FromEmail
 	if strings.TrimSpace(setting.FromName) != "" {
 		from = fmt.Sprintf("%s <%s>", setting.FromName, setting.FromEmail)
@@ -1051,14 +1058,55 @@ func sendVerificationMail(setting model.MailSetting, email string, purpose strin
 	return smtp.SendMail(addr, auth, setting.FromEmail, []string{email}, []byte(message))
 }
 
-func renderMailTemplate(template string, email string, code string, expireMinutes int) string {
+func renderMailTemplate(template string, email string, code string, expireMinutes int, context MailTemplateContext) string {
+	context = normalizeMailTemplateContext(context)
 	replacer := strings.NewReplacer(
 		"{{code}}", code,
 		"{{email}}", email,
 		"{{expireMinutes}}", strconv.Itoa(expireMinutes),
 		"{{siteName}}", "边缘幻星",
+		"{{ip}}", context.IP,
+		"{{country}}", context.Country,
+		"{{region}}", context.Region,
 	)
 	return replacer.Replace(template)
+}
+
+func MailTemplateContextFromRequest(r *http.Request) MailTemplateContext {
+	return normalizeMailTemplateContext(MailTemplateContext{
+		IP:      requestIP(r),
+		Country: firstNonEmpty(r.Header.Get("CF-IPCountry"), r.Header.Get("X-Vercel-IP-Country"), r.Header.Get("CloudFront-Viewer-Country")),
+		Region:  firstNonEmpty(r.Header.Get("CF-Region"), r.Header.Get("X-Vercel-IP-Country-Region"), r.Header.Get("X-Region")),
+	})
+}
+
+func normalizeMailTemplateContext(context MailTemplateContext) MailTemplateContext {
+	if strings.TrimSpace(context.IP) == "" {
+		context.IP = "未知"
+	}
+	if strings.TrimSpace(context.Country) == "" {
+		context.Country = "未知"
+	}
+	if strings.TrimSpace(context.Region) == "" {
+		context.Region = "未知"
+	}
+	return context
+}
+
+func requestIP(r *http.Request) string {
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+		if parts := strings.Split(forwarded, ","); strings.TrimSpace(parts[0]) != "" {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		return realIP
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 func decodeState(state string) string {

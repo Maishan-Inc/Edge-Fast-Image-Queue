@@ -14,7 +14,7 @@ import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeVa
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
-import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { isCloudStorageKey, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { requestVideoGeneration } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -143,8 +143,8 @@ export default function VideoPage() {
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
         try {
-            const blob = await requestVideoGeneration(snapshot.config, snapshot.text, snapshot.references);
-            const stored = await uploadMediaFile(blob, "video");
+            const media = await requestVideoGeneration(snapshot.config, snapshot.text, snapshot.references);
+            const stored = await uploadMediaFile(media, "video");
             const nextVideo: GeneratedVideo = {
                 id: nanoid(),
                 url: stored.url,
@@ -571,8 +571,8 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
 function serializeLog(log: GenerationLog): GenerationLog {
     return {
         ...log,
-        references: log.references.map((item) => ({ ...item, dataUrl: item.storageKey ? "" : item.dataUrl })),
-        video: log.video?.storageKey ? { ...log.video, url: "" } : log.video,
+        references: log.references.map((item) => ({ ...item, dataUrl: item.storageKey && !isCloudStorageKey(item.storageKey) ? "" : item.dataUrl })),
+        video: log.video?.storageKey && !log.video.storageKey.startsWith("cloud:") ? { ...log.video, url: "" } : log.video,
     };
 }
 

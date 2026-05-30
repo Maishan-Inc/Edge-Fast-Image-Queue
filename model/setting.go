@@ -64,10 +64,29 @@ type PublicOAuthProviderSetting struct {
 
 // PrivateSetting 私有配置。
 type PrivateSetting struct {
-	Channels   []ModelChannel     `json:"channels"`
-	PromptSync PromptSyncSetting  `json:"promptSync"`
-	Auth       PrivateAuthSetting `json:"auth"`
-	Mail       MailSetting        `json:"mail"`
+	Channels     []ModelChannel      `json:"channels"`
+	PromptSync   PromptSyncSetting   `json:"promptSync"`
+	Auth         PrivateAuthSetting  `json:"auth"`
+	Mail         MailSetting         `json:"mail"`
+	CloudStorage CloudStorageSetting `json:"cloudStorage"`
+}
+
+// CloudStorageSetting 云存储配置。Cloudflare R2 通过 S3-compatible endpoint 访问。
+type CloudStorageSetting struct {
+	Enabled            bool   `json:"enabled"`
+	Provider           string `json:"provider"`
+	Endpoint           string `json:"endpoint"`
+	Region             string `json:"region"`
+	AccessKeyID        string `json:"accessKeyId"`
+	SecretAccessKey    string `json:"secretAccessKey"`
+	Bucket             string `json:"bucket"`
+	PublicBaseURL      string `json:"publicBaseUrl"`
+	ImagePathTemplate  string `json:"imagePathTemplate"`
+	VideoPathTemplate  string `json:"videoPathTemplate"`
+	ImageExpireDays    int    `json:"imageExpireDays"`
+	VideoExpireDays    int    `json:"videoExpireDays"`
+	AutoCleanupEnabled *bool  `json:"autoCleanupEnabled"`
+	PathStyleEndpoint  *bool  `json:"pathStyleEndpoint"`
 }
 
 // PromptSyncSetting 提示词定时同步配置。

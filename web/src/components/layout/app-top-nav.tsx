@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, Settings2 } from "lucide-react";
+import { Languages, Menu, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -14,6 +14,8 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { localeLabels } from "@/i18n/messages";
+import { useI18n } from "@/hooks/use-i18n";
 
 export function AppTopNav() {
     const pathname = usePathname();
@@ -23,6 +25,7 @@ export function AppTopNav() {
     const setTheme = useThemeStore((state) => state.setTheme);
     const user = useUserStore((state) => state.user);
     const isReady = useUserStore((state) => state.isReady);
+    const { locale, setLocale, t } = useI18n();
     const hideHeader = /^\/canvas\/[^/]+/.test(pathname);
     const slug = pathname.split("/").filter(Boolean)[0];
     const activeToolSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
@@ -78,6 +81,16 @@ export function AppTopNav() {
                         </div>
 
                         <div className="my-auto flex h-9 min-w-0 items-center justify-end gap-2 justify-self-end whitespace-nowrap">
+                            <button
+                                type="button"
+                                className="inline-flex h-8 shrink-0 items-center gap-1.5 px-1 text-sm text-stone-600 transition hover:text-stone-950 dark:text-stone-300 dark:hover:text-white [&_svg]:size-4"
+                                onClick={() => setLocale(locale === "zh-CN" ? "en-US" : "zh-CN")}
+                                aria-label={t("locale.switch")}
+                                title={t("locale.switch")}
+                            >
+                                <Languages className="size-4" />
+                                <span>{localeLabels[locale]}</span>
+                            </button>
                             {isReady && user ? (
                                 <UserStatusActions />
                             ) : (

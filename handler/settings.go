@@ -14,6 +14,15 @@ type adminChannelActionRequest struct {
 	Model   string             `json:"model"`
 }
 
+type adminCloudStorageTestRequest struct {
+	Setting model.CloudStorageSetting `json:"setting"`
+}
+
+type adminMailTestRequest struct {
+	Setting model.MailSetting `json:"setting"`
+	Email   string            `json:"email"`
+}
+
 func Settings(w http.ResponseWriter, r *http.Request) {
 	settings, err := service.PublicSettings()
 	if err != nil {
@@ -71,4 +80,25 @@ func AdminTestChannelModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	OK(w, result)
+}
+
+func AdminTestCloudStorage(w http.ResponseWriter, r *http.Request) {
+	var request adminCloudStorageTestRequest
+	_ = json.NewDecoder(r.Body).Decode(&request)
+	result, err := service.AdminTestCloudStorage(request.Setting)
+	if err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, result)
+}
+
+func AdminTestMail(w http.ResponseWriter, r *http.Request) {
+	var request adminMailTestRequest
+	_ = json.NewDecoder(r.Body).Decode(&request)
+	if err := service.AdminTestMail(request.Setting, request.Email, service.MailTemplateContextFromRequest(r)); err != nil {
+		FailError(w, err)
+		return
+	}
+	OK(w, true)
 }

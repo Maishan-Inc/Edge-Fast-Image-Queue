@@ -14,6 +14,16 @@ export type UploadedImage = {
     mimeType: string;
 };
 
+type CloudImageInput = {
+    dataUrl?: string;
+    url?: string;
+    storageKey?: string;
+    width?: number;
+    height?: number;
+    bytes?: number;
+    mimeType?: string;
+};
+
 const store = localforage.createInstance({ name: "aivro", storeName: "image_files" });
 const objectUrls = new Map<string, string>();
 
@@ -27,8 +37,18 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
 }
 
+export async function storeGeneratedImage(input: string | Blob | CloudImageInput): Promise<UploadedImage> {
+    if (typeof input === "object" && !(input instanceof Blob) && isCloudStorageKey(input.storageKey)) {
+        const url = input.dataUrl || input.url || "";
+        const meta = input.width && input.height ? { width: input.width, height: input.height, mimeType: input.mimeType || "image/png" } : await readImageMeta(url);
+        return { url, storageKey: input.storageKey || "", width: meta.width, height: meta.height, bytes: input.bytes || 0, mimeType: input.mimeType || meta.mimeType };
+    }
+    return uploadImage(input as string | Blob);
+}
+
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
     if (!storageKey) return fallback;
+    if (!storageKey.startsWith("image:")) return fallback;
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
     const blob = await store.getItem<Blob>(storageKey);
@@ -36,6 +56,10 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     const url = URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
     return url;
+}
+
+export function isCloudStorageKey(storageKey?: string) {
+    return Boolean(storageKey?.startsWith("cloud:"));
 }
 
 export async function getImageBlob(storageKey: string) {

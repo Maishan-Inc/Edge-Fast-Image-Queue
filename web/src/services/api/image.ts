@@ -19,6 +19,15 @@ type ImageApiResponse = {
     msg?: string;
 };
 
+export type ImageApiResult = {
+    id: string;
+    dataUrl: string;
+    storageKey?: string;
+    bytes?: number;
+    mimeType?: string;
+    expiresAt?: string;
+};
+
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
     medium: 2048,
@@ -80,15 +89,25 @@ function resolveImageDataUrl(item: Record<string, unknown>) {
     return null;
 }
 
-function parseImagePayload(payload: ImageApiResponse) {
+function parseImagePayload(payload: ImageApiResponse): ImageApiResult[] {
     if (typeof payload.code === "number" && payload.code !== 0) {
         throw new Error(payload.msg || "请求失败");
     }
     const images =
         payload.data
-            ?.map(resolveImageDataUrl)
-            .filter((value): value is string => Boolean(value))
-            .map((dataUrl) => ({ id: nanoid(), dataUrl })) || [];
+            ?.map((item) => {
+                const dataUrl = resolveImageDataUrl(item);
+                if (!dataUrl) return null;
+                return {
+                    id: nanoid(),
+                    dataUrl,
+                    storageKey: typeof item.storage_key === "string" ? item.storage_key : undefined,
+                    bytes: typeof item.size === "number" ? item.size : undefined,
+                    mimeType: typeof item.content_type === "string" ? item.content_type : undefined,
+                    expiresAt: typeof item.expires_at === "string" ? item.expires_at : undefined,
+                };
+            })
+            .filter((value): value is ImageApiResult => Boolean(value)) || [];
 
     if (images.length === 0) {
         throw new Error("接口没有返回图片");

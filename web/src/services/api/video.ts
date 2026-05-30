@@ -5,6 +5,7 @@ import { imageToDataUrl } from "@/services/image-storage";
 import { buildApiUrl, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
+import type { UploadedFile } from "@/services/file-storage";
 
 type VideoResponse = { id: string; status?: string; error?: { message?: string } };
 type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
@@ -22,7 +23,7 @@ function refreshRemoteUser(config: AiConfig) {
     if (config.channelMode === "remote") void useUserStore.getState().hydrateUser();
 }
 
-export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = []) {
+export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = []): Promise<Blob | UploadedFile> {
     const model = config.model || config.videoModel;
     const body = new FormData();
     body.append("model", model);
@@ -43,11 +44,28 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
             await new Promise((resolve) => setTimeout(resolve, 2500));
         }
         const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${created.id}/content`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model } : undefined, responseType: "blob" });
+        const cloudFile = await readCloudVideoFile(content.data);
+        if (cloudFile) {
+            refreshRemoteUser(config);
+            return cloudFile;
+        }
         await assertVideoBlob(content.data);
         refreshRemoteUser(config);
         return content.data;
     } catch (error) {
         throw new Error(readAxiosError(error, "视频生成失败"));
+    }
+}
+
+async function readCloudVideoFile(blob: Blob): Promise<UploadedFile | null> {
+    if (!blob.type.includes("json")) return null;
+    try {
+        const payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; data?: UploadedFile };
+        if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "视频下载失败");
+        return payload.data?.url ? payload.data : null;
+    } catch (error) {
+        if (error instanceof Error && error.message !== "Unexpected end of JSON input") throw error;
+        return null;
     }
 }
 

@@ -20,6 +20,7 @@
 - `prompts`
 - `assets`
 - `settings`
+- `cloud_files`
 
 后续新增表时再同步补充本文档，未实际使用的规划表不提前写入。
 
@@ -175,6 +176,7 @@
 | `promptSync` | object | GitHub 远程提示词定时同步配置 |
 | `auth` | object | 私有登录配置 |
 | `mail` | object | SMTP 邮件验证码配置 |
+| `cloudStorage` | object | Cloudflare R2 / S3 兼容云存储配置 |
 
 `channels` 每项字段：
 
@@ -225,7 +227,52 @@ OAuth 私有配置字段：
 | `codeExpireMin` | number | 验证码有效分钟数 |
 | `templates` | object | 注册、找回密码和 MetaMask 邮箱验证模板 |
 
+`cloudStorage` 当前字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `enabled` | bool | 是否开启云存储，默认关闭 |
+| `provider` | string | 服务商：`r2`、`s3` |
+| `endpoint` | string | S3 兼容 Endpoint，R2 使用账号级 endpoint |
+| `region` | string | Region，R2 默认 `auto` |
+| `accessKeyId` | string | Access Key ID |
+| `secretAccessKey` | string | Secret Access Key，后台返回时隐藏，留空保存表示不修改 |
+| `bucket` | string | Bucket 名称 |
+| `publicBaseUrl` | string | 自定义域名 / Public Base URL |
+| `imagePathTemplate` | string | 图片路径模板，默认 `{username}/images/{yyyy}/{mm}/{dd}/{filename}` |
+| `videoPathTemplate` | string | 视频路径模板，默认 `{username}/videos/{yyyy}/{mm}/{dd}/{filename}` |
+| `imageExpireDays` | number | 图片默认过期天数，默认 7 |
+| `videoExpireDays` | number | 视频默认过期天数，默认 7 |
+| `autoCleanupEnabled` | bool | 是否启用自动清理 |
+| `pathStyleEndpoint` | bool | 是否使用 Path Style Endpoint |
+
+邮件模板支持变量：`{{code}}`、`{{email}}`、`{{expireMinutes}}`、`{{siteName}}`、`{{ip}}`、`{{country}}`、`{{region}}`。
+
 后端请求模型时，先按模型名筛选启用且包含该模型的渠道，再按 `weight` 加权随机选择一个渠道。
+
+### cloud_files
+
+云存储文件表。开启云存储后，后端把生成后的图片、视频转存到 Cloudflare R2 或 S3 兼容存储，并在该表记录对象地址和到期时间。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 主键 |
+| `user_id` | string | 用户 ID |
+| `username` | string | 用户名，用于路径模板中的 `{username}` |
+| `provider` | string | 服务商：`r2`、`s3` |
+| `file_type` | string | 文件类型：`image`、`video` |
+| `bucket` | string | Bucket 名称 |
+| `object_key` | string | 云端对象 Key |
+| `public_url` | string | 前端展示、预览、下载使用的公开访问地址 |
+| `content_type` | string | 文件 MIME 类型 |
+| `size` | number | 文件字节数 |
+| `source` | string | 来源接口，例如 `/images/generations`、`/videos/:id/content` |
+| `expires_at` | string | 到期时间，图片和视频按各自配置分别计算 |
+| `deleted_at` | string | 云端对象删除成功后的标记时间，未删除为空 |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+自动清理任务只处理 `expires_at <= now` 且 `deleted_at` 为空的记录；删除云端对象成功后写入 `deleted_at`，删除失败只记录后端日志，不影响其他请求。
 
 ### credit_logs
 

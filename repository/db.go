@@ -67,6 +67,7 @@ func migrateModels(db *gorm.DB) error {
 		&model.Prompt{},
 		&model.Asset{},
 		&model.Setting{},
+		&model.CloudFile{},
 	)
 }
 

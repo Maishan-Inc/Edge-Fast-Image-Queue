@@ -75,7 +75,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 func SendEmailCode(w http.ResponseWriter, r *http.Request) {
 	var request emailCodeRequest
 	_ = json.NewDecoder(r.Body).Decode(&request)
-	if err := service.SendEmailCode(request.Email, request.Purpose); err != nil {
+	if err := service.SendEmailCode(request.Email, request.Purpose, service.MailTemplateContextFromRequest(r)); err != nil {
 		FailError(w, err)
 		return
 	}

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/basketikun/aivro/model"
 	"github.com/basketikun/aivro/service"
 )
 
@@ -55,7 +56,8 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
-	copyAIResponse(w, request, nil)
+	user, _ := service.UserFromContext(r.Context())
+	copyAIResponse(w, request, nil, aiProxyContext{Request: r, User: user, Path: path})
 }
 
 func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
@@ -101,10 +103,16 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		if err := service.RefundUserCredits(user.ID, modelName, credits, path); err != nil {
 			log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, err)
 		}
-	})
+	}, aiProxyContext{Request: r, User: user, Path: path})
 }
 
-func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func()) {
+type aiProxyContext struct {
+	Request *http.Request
+	User    model.AuthUser
+	Path    string
+}
+
+func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func(), proxyContext aiProxyContext) {
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		log.Printf("AI proxy request failed: url=%s err=%v", request.URL.String(), err)
@@ -126,6 +134,11 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 		return
 	}
 
+	if cloudResponse, ok := rewriteCloudAIResponse(w, response, proxyContext, onFailure); ok {
+		_, _ = w.Write(cloudResponse)
+		return
+	}
+
 	for key, values := range response.Header {
 		if strings.EqualFold(key, "Content-Length") {
 			continue
@@ -136,6 +149,68 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 	}
 	w.WriteHeader(response.StatusCode)
 	_, _ = io.Copy(w, response.Body)
+}
+
+func rewriteCloudAIResponse(w http.ResponseWriter, response *http.Response, proxyContext aiProxyContext, onFailure func()) ([]byte, bool) {
+	setting, enabled, err := service.CloudStorageEnabled()
+	if err != nil || !enabled || !setting.Enabled {
+		return nil, false
+	}
+	if proxyContext.User.ID == "" {
+		return nil, false
+	}
+	isImageResponse := proxyContext.Path == "/images/generations" || proxyContext.Path == "/images/edits"
+	isVideoContent := strings.HasPrefix(proxyContext.Path, "/videos/") && strings.HasSuffix(proxyContext.Path, "/content")
+	if !isImageResponse && !isVideoContent {
+		return nil, false
+	}
+	body, readErr := io.ReadAll(response.Body)
+	if readErr != nil {
+		log.Printf("AI proxy read cloud response failed: path=%s err=%v", proxyContext.Path, readErr)
+		if onFailure != nil {
+			onFailure()
+		}
+		Fail(w, "云存储转存失败")
+		return nil, true
+	}
+	if isImageResponse {
+		rewritten, err := service.StoreImageResponseToCloud(proxyContext.Request.Context(), proxyContext.User, body, proxyContext.Path)
+		if err != nil {
+			log.Printf("AI image cloud transfer failed: path=%s err=%v", proxyContext.Path, err)
+			if onFailure != nil {
+				onFailure()
+			}
+			Fail(w, "云存储转存失败")
+			return nil, true
+		}
+		copyResponseHeaders(w, response.Header)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(response.StatusCode)
+		return rewritten, true
+	}
+	rewritten, err := service.StoreVideoContentToCloud(proxyContext.Request.Context(), proxyContext.User, body, response.Header.Get("Content-Type"), proxyContext.Path)
+	if err != nil {
+		log.Printf("AI video cloud transfer failed: path=%s err=%v", proxyContext.Path, err)
+		if onFailure != nil {
+			onFailure()
+		}
+		Fail(w, "云存储转存失败")
+		return nil, true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	return rewritten, true
+}
+
+func copyResponseHeaders(w http.ResponseWriter, header http.Header) {
+	for key, values := range header {
+		if strings.EqualFold(key, "Content-Length") {
+			continue
+		}
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
 }
 
 func readAIRequest(r *http.Request) ([]byte, string, string, error) {

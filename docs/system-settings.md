@@ -27,9 +27,9 @@
     "allowRegister": true,
     "emailVerification": false,
     "linuxDo": { "id": "linux-do", "name": "Linux.do", "iconUrl": "/icons/linuxdo.svg", "enabled": false },
-    "google": { "id": "google", "name": "Google", "iconUrl": "", "enabled": false },
-    "github": { "id": "github", "name": "GitHub", "iconUrl": "", "enabled": false },
-    "metamask": { "id": "metamask", "name": "MetaMask", "iconUrl": "", "enabled": false },
+    "google": { "id": "google", "name": "Google", "iconUrl": "/icons/google.svg", "enabled": false },
+    "github": { "id": "github", "name": "GitHub", "iconUrl": "/icons/github.svg", "enabled": false },
+    "metamask": { "id": "metamask", "name": "MetaMask", "iconUrl": "/icons/metamask.svg", "enabled": false },
     "customProviders": [{ "id": "o2", "name": "O2", "iconUrl": "", "enabled": false }]
   }
 }
@@ -112,6 +112,22 @@
     "fromName": "",
     "codeExpireMin": 10,
     "templates": {}
+  },
+  "cloudStorage": {
+    "enabled": false,
+    "provider": "r2",
+    "endpoint": "",
+    "region": "auto",
+    "accessKeyId": "",
+    "secretAccessKey": "",
+    "bucket": "",
+    "publicBaseUrl": "",
+    "imagePathTemplate": "{username}/images/{yyyy}/{mm}/{dd}/{filename}",
+    "videoPathTemplate": "{username}/videos/{yyyy}/{mm}/{dd}/{filename}",
+    "imageExpireDays": 7,
+    "videoExpireDays": 7,
+    "autoCleanupEnabled": true,
+    "pathStyleEndpoint": true
   }
 }
 ```
@@ -122,6 +138,7 @@
 | `promptSync` | object | GitHub 远程提示词定时同步配置 |
 | `auth` | object | OAuth、MetaMask 和自定义登录私有配置 |
 | `mail` | object | SMTP 验证码与邮件模板配置 |
+| `cloudStorage` | object | Cloudflare R2 / S3 兼容云存储配置 |
 
 `channels` 每项字段：
 
@@ -138,9 +155,46 @@
 
 后端调用模型时，会从已启用、已配置 `baseUrl` 和 `apiKey`、且 `models` 包含目标模型的渠道中选择一个。
 
+`cloudStorage` 字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `enabled` | boolean | 是否开启云存储，默认关闭；关闭时图片、视频生成仍使用原本的浏览器本地存储流程 |
+| `provider` | string | 服务商：`r2` 表示 Cloudflare R2，`s3` 表示兼容 S3 |
+| `endpoint` | string | S3 兼容 Endpoint；Cloudflare R2 形如 `https://<accountid>.r2.cloudflarestorage.com` |
+| `region` | string | Region；R2 默认使用 `auto` |
+| `accessKeyId` | string | Access Key ID |
+| `secretAccessKey` | string | Secret Access Key，后台返回时隐藏；编辑时留空表示沿用已保存密钥 |
+| `bucket` | string | Bucket 名称 |
+| `publicBaseUrl` | string | 自定义域名 / Public Base URL；配置后 `public_url` 使用该基地址拼接对象路径 |
+| `imagePathTemplate` | string | 图片路径模板，默认 `{username}/images/{yyyy}/{mm}/{dd}/{filename}` |
+| `videoPathTemplate` | string | 视频路径模板，默认 `{username}/videos/{yyyy}/{mm}/{dd}/{filename}` |
+| `imageExpireDays` | number | 图片默认过期天数，默认 7 天 |
+| `videoExpireDays` | number | 视频默认过期天数，默认 7 天 |
+| `autoCleanupEnabled` | boolean | 是否启用自动清理，默认开启 |
+| `pathStyleEndpoint` | boolean | 是否使用 Path Style Endpoint，R2 默认开启 |
+
+路径模板支持 `{username}`、`{yyyy}`、`{mm}`、`{dd}`、`{filename}`。开启云存储后，后端会把图片和视频生成结果转存到云端，写入 `cloud_files`，并把接口返回内容改为云端 `public_url`；图片和视频过期时间按各自天数分别计算。自动清理只删除已到期且未标记删除的云端对象，删除失败只记录日志。
+
 `promptSync` 字段：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `enabled` | boolean | 是否开启定时同步，默认开启 |
 | `cron` | string | Cron 表达式，默认每 5 分钟 |
+
+`mail` 字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `enabled` | boolean | 是否开启 SMTP 邮件 |
+| `host` | string | SMTP Host |
+| `port` | number | SMTP 端口 |
+| `username` | string | SMTP 用户名 |
+| `password` | string | SMTP 密码，后台返回时隐藏 |
+| `fromEmail` | string | 发件邮箱 |
+| `fromName` | string | 发件名称 |
+| `codeExpireMin` | number | 验证码有效分钟数 |
+| `templates` | object | 注册、找回密码和 MetaMask 邮箱验证模板 |
+
+邮件模板可用变量：`{{code}}`、`{{email}}`、`{{expireMinutes}}`、`{{siteName}}`、`{{ip}}`、`{{country}}`、`{{region}}`。

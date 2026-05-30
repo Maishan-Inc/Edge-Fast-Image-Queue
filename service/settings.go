@@ -33,6 +33,7 @@ func SaveSettings(settings model.Settings) (model.Settings, error) {
 	settings = normalizeSettings(settings)
 	keepPrivateAPIKeys(&settings, normalizeSettings(saved))
 	keepPrivateAuthSecrets(&settings, normalizeSettings(saved))
+	keepCloudStorageSecrets(&settings, normalizeSettings(saved))
 	result, err := repository.SaveSettings(settings, now())
 	if err == nil {
 		RefreshPromptSyncScheduler()
@@ -54,6 +55,22 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 		return "", err
 	}
 	return testAdminChannelModel(resolved, modelName)
+}
+
+func AdminTestMail(setting model.MailSetting, email string, context MailTemplateContext) error {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" {
+		return safeMessageError{message: "请填写测试收件邮箱"}
+	}
+	settings, err := repository.GetSettings()
+	if err != nil {
+		return err
+	}
+	setting = normalizeMailSetting(setting)
+	if strings.TrimSpace(setting.Password) == "" {
+		setting.Password = normalizeMailSetting(settings.Private.Mail).Password
+	}
+	return sendVerificationMail(setting, email, "register", "123456", context)
 }
 
 func AdminUpdateDatabase() error {
@@ -92,9 +109,9 @@ func normalizePublicSetting(setting model.PublicSetting) model.PublicSetting {
 		setting.Auth.EmailVerification = &enabled
 	}
 	setting.Auth.LinuxDo = normalizePublicAuthProvider(setting.Auth.LinuxDo, "linux-do", "Linux.do", "/icons/linuxdo.svg")
-	setting.Auth.Google = normalizePublicAuthProvider(setting.Auth.Google, "google", "Google", "")
-	setting.Auth.Github = normalizePublicAuthProvider(setting.Auth.Github, "github", "GitHub", "")
-	setting.Auth.MetaMask = normalizePublicAuthProvider(setting.Auth.MetaMask, "metamask", "MetaMask", "")
+	setting.Auth.Google = normalizePublicAuthProvider(setting.Auth.Google, "google", "Google", "/icons/google.svg")
+	setting.Auth.Github = normalizePublicAuthProvider(setting.Auth.Github, "github", "GitHub", "/icons/github.svg")
+	setting.Auth.MetaMask = normalizePublicAuthProvider(setting.Auth.MetaMask, "metamask", "MetaMask", "/icons/metamask.svg")
 	if setting.Auth.CustomProviders == nil {
 		setting.Auth.CustomProviders = []model.PublicOAuthProviderSetting{{ID: "o2", Name: "O2", Enabled: false}}
 	}
@@ -122,6 +139,7 @@ func normalizePrivateSetting(setting model.PrivateSetting) model.PrivateSetting 
 	setting.PromptSync = normalizePromptSyncSetting(setting.PromptSync)
 	setting.Auth = normalizePrivateAuthSetting(setting.Auth)
 	setting.Mail = normalizeMailSetting(setting.Mail)
+	setting.CloudStorage = normalizeCloudStorageSetting(setting.CloudStorage)
 	for i := range setting.Channels {
 		if setting.Channels[i].Protocol == "" {
 			setting.Channels[i].Protocol = "openai"
@@ -147,6 +165,7 @@ func hidePrivateAPIKeys(settings model.Settings) model.Settings {
 		settings.Private.Auth.CustomProviders[i].ClientSecret = ""
 	}
 	settings.Private.Mail.Password = ""
+	settings.Private.CloudStorage.SecretAccessKey = ""
 	return settings
 }
 
@@ -181,6 +200,12 @@ func keepPrivateAuthSecrets(settings *model.Settings, saved model.Settings) {
 	}
 	if strings.TrimSpace(settings.Private.Mail.Password) == "" {
 		settings.Private.Mail.Password = saved.Private.Mail.Password
+	}
+}
+
+func keepCloudStorageSecrets(settings *model.Settings, saved model.Settings) {
+	if strings.TrimSpace(settings.Private.CloudStorage.SecretAccessKey) == "" {
+		settings.Private.CloudStorage.SecretAccessKey = saved.Private.CloudStorage.SecretAccessKey
 	}
 }
 
@@ -243,19 +268,19 @@ func normalizeMailSetting(setting model.MailSetting) model.MailSetting {
 		setting.Templates.Register.Subject = "注册验证码：{{code}}"
 	}
 	if setting.Templates.Register.Body == "" {
-		setting.Templates.Register.Body = "你的注册验证码是 {{code}}，{{expireMinutes}} 分钟内有效。"
+		setting.Templates.Register.Body = "你的注册验证码是 {{code}}，{{expireMinutes}} 分钟内有效。\n请求 IP：{{ip}}\n国家/地区：{{country}} {{region}}"
 	}
 	if setting.Templates.Reset.Subject == "" {
 		setting.Templates.Reset.Subject = "找回密码验证码：{{code}}"
 	}
 	if setting.Templates.Reset.Body == "" {
-		setting.Templates.Reset.Body = "你的找回密码验证码是 {{code}}，{{expireMinutes}} 分钟内有效。"
+		setting.Templates.Reset.Body = "你的找回密码验证码是 {{code}}，{{expireMinutes}} 分钟内有效。\n请求 IP：{{ip}}\n国家/地区：{{country}} {{region}}"
 	}
 	if setting.Templates.MetaMask.Subject == "" {
 		setting.Templates.MetaMask.Subject = "MetaMask 登录邮箱验证码：{{code}}"
 	}
 	if setting.Templates.MetaMask.Body == "" {
-		setting.Templates.MetaMask.Body = "你的 MetaMask 登录邮箱验证码是 {{code}}，{{expireMinutes}} 分钟内有效。"
+		setting.Templates.MetaMask.Body = "你的 MetaMask 登录邮箱验证码是 {{code}}，{{expireMinutes}} 分钟内有效。\n请求 IP：{{ip}}\n国家/地区：{{country}} {{region}}"
 	}
 	return setting
 }

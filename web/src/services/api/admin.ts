@@ -222,6 +222,24 @@ export type AdminPrivateSettings = {
         customProviders: AdminPrivateAuthProvider[];
     };
     mail: AdminMailSettings;
+    cloudStorage: AdminCloudStorageSettings;
+};
+
+export type AdminCloudStorageSettings = {
+    enabled: boolean;
+    provider: "r2" | "s3";
+    endpoint: string;
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    bucket: string;
+    publicBaseUrl: string;
+    imagePathTemplate: string;
+    videoPathTemplate: string;
+    imageExpireDays: number;
+    videoExpireDays: number;
+    autoCleanupEnabled: boolean;
+    pathStyleEndpoint: boolean;
 };
 
 export type AdminPrivateAuthProvider = AdminPublicAuthProvider & {
@@ -283,4 +301,12 @@ export async function fetchChannelModels(token: string, payload: AdminChannelAct
 
 export async function testChannelModel(token: string, payload: AdminChannelActionRequest) {
     return apiPost<string>("/api/admin/settings/channel-test", payload, token);
+}
+
+export async function testCloudStorage(token: string, setting: AdminCloudStorageSettings) {
+    return apiPost<string>("/api/admin/settings/cloud-storage-test", { setting }, token);
+}
+
+export async function testMailSettings(token: string, setting: AdminMailSettings, email: string) {
+    return apiPost<boolean>("/api/admin/settings/mail-test", { setting, email }, token);
 }

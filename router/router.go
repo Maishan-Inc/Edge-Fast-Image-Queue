@@ -65,6 +65,8 @@ func New() *gin.Engine {
 	admin.POST("/settings/database-update", gin.WrapF(handler.AdminUpdateDatabase))
 	admin.POST("/settings/channel-models", gin.WrapF(handler.AdminChannelModels))
 	admin.POST("/settings/channel-test", gin.WrapF(handler.AdminTestChannelModel))
+	admin.POST("/settings/mail-test", gin.WrapF(handler.AdminTestMail))
+	admin.POST("/settings/cloud-storage-test", gin.WrapF(handler.AdminTestCloudStorage))
 	admin.GET("/prompt-categories", gin.WrapF(handler.AdminPromptCategories))
 	admin.POST("/prompt-categories/sync", gin.WrapF(handler.AdminSyncPromptCategories))
 	admin.GET("/prompts", gin.WrapF(handler.AdminPrompts))
