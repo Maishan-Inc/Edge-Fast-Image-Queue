@@ -152,8 +152,7 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 }
 
 func rewriteCloudAIResponse(w http.ResponseWriter, response *http.Response, proxyContext aiProxyContext, onFailure func()) ([]byte, bool) {
-	setting, enabled, err := service.CloudStorageEnabled()
-	if err != nil || !enabled || !setting.Enabled {
+	if _, _, err := service.CloudStorageEnabled(); err != nil {
 		return nil, false
 	}
 	if proxyContext.User.ID == "" {

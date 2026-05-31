@@ -22,6 +22,7 @@
 - `settings`
 - `cloud_files`
 - `generation_histories`
+- `user_preferences`
 - `workflows`
 - `workflow_shares`
 - `workflow_share_copies`
@@ -295,27 +296,31 @@ OAuth 私有配置字段：
 
 ### cloud_files
 
-云存储文件表。开启云存储后，后端把生成后的图片、视频转存到 Cloudflare R2 或 S3 兼容存储，并在该表记录对象地址和到期时间。
+用户文件表。后端把上传图片、剪贴板图片、参考图、生成图片和生成视频写入统一文件记录；开启云存储时写入 Cloudflare R2 或 S3 兼容存储，未开启云存储时写入服务器本地 `LOCAL_FILE_DIR` 目录。
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | string | 主键 |
 | `user_id` | string | 用户 ID |
 | `username` | string | 用户名，用于路径模板中的 `{username}` |
-| `provider` | string | 服务商：`r2`、`s3` |
+| `provider` | string | 服务商：`r2`、`s3`、`local` |
 | `file_type` | string | 文件类型：`image`、`video` |
+| `purpose` | string | 用途：`temp`、`workflow`、`generation` |
+| `workflow_id` | string | 关联工作流 ID，用于删除工作流时同步删除文件 |
+| `history_id` | string | 关联生成历史 ID，用于删除历史时同步删除文件 |
 | `bucket` | string | Bucket 名称 |
-| `object_key` | string | 云端对象 Key |
-| `public_url` | string | 前端展示、预览、下载使用的公开访问地址 |
+| `object_key` | string | 云端对象 Key 或服务器本地相对路径 |
+| `public_url` | string | 前端展示、预览、下载使用的受控访问地址 |
+| `access_token` | string | 文件访问随机 token，不返回给普通 JSON 接口字段 |
 | `content_type` | string | 文件 MIME 类型 |
 | `size` | number | 文件字节数 |
 | `source` | string | 来源接口，例如 `/images/generations`、`/videos/:id/content` |
-| `expires_at` | string | 到期时间，图片和视频按各自配置分别计算 |
-| `deleted_at` | string | 云端对象删除成功后的标记时间，未删除为空 |
+| `expires_at` | string | 到期时间。生成历史和临时文件默认 7 天，工作流文件为空表示跟随工作流长期保留 |
+| `deleted_at` | string | 对象删除成功后的标记时间，未删除为空 |
 | `created_at` | string | 创建时间 |
 | `updated_at` | string | 更新时间 |
 
-自动清理任务只处理 `expires_at <= now` 且 `deleted_at` 为空的记录；删除云端对象成功后写入 `deleted_at`，删除失败只记录后端日志，不影响其他请求。
+用户上传入口只接受安全白名单内的图片或视频 MIME 类型，单文件最大 5MB。文件内容读取时会校验所属用户或访问 token，不能通过猜测文件 ID 读取其他用户文件。自动清理任务只处理 `expires_at <= now` 且 `deleted_at` 为空的记录；删除对象成功后写入 `deleted_at`，删除失败只记录后端日志，不影响其他请求。
 
 ### workflows
 
@@ -342,6 +347,8 @@ OAuth 私有配置字段：
 | `deleted_at` | string | 软删除时间，未删除为空 |
 
 创建普通工作流和复制分享工作流都会在事务中扣减 `users.workflow_create_credits` 1 次，并写入 `entitlement_logs`。
+
+工作流保存时会把节点、参考图、助手会话中引用的 `cloud_files` 绑定为 `purpose=workflow` 并清空过期时间；删除工作流时会同步删除关联文件。
 
 ### workflow_shares
 
@@ -456,7 +463,7 @@ KYC 认证记录表。当前服务商为 Didit。
 
 ### generation_histories
 
-用户图片、视频生成历史表。历史记录只保存已转存到 `cloud_files` 的图片或视频，展示周期跟随关联云端文件的 `expires_at`；如果关联媒体不存在、已删除或已过期，列表接口会自动移除该历史记录。
+用户图片、视频生成历史表。历史记录只保存已转存到 `cloud_files` 的参考图、图片或视频，默认保存 7 天；如果关联媒体不存在、已删除或已过期，列表接口会自动移除该历史记录。
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -473,6 +480,19 @@ KYC 认证记录表。当前服务商为 Didit。
 | `error` | text | 失败信息，成功时为空 |
 | `duration_ms` | number | 本次生成耗时毫秒数 |
 | `expires_at` | string | 历史到期时间，取关联媒体中最早的 `expires_at` |
+| `created_at` | string | 创建时间 |
+| `updated_at` | string | 更新时间 |
+
+删除生成历史或历史到期清理时，会同步删除关联的生成媒体和参考图文件，R2/S3 与服务器本地存储使用同一套删除逻辑。
+
+### user_preferences
+
+用户偏好表。用于保存用户侧主题、语言和 AI 参数偏好，不再依赖浏览器本地缓存作为长期偏好来源。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `user_id` | string | 用户 ID，主键 |
+| `value` | json | 偏好 JSON，例如 `theme`、`locale`、`config` |
 | `created_at` | string | 创建时间 |
 | `updated_at` | string | 更新时间 |
 

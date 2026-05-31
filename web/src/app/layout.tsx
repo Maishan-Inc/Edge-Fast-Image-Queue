@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Script from "next/script";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { AppProviders } from "@/components/layout/app-providers";
 import "antd/dist/reset.css";
@@ -9,6 +8,11 @@ import React from "react";
 export const metadata: Metadata = {
     title: "边缘幻星",
     description: "Aivro - AI 驱动的无限画布创作工具",
+    icons: {
+        icon: "/logo.svg",
+        shortcut: "/logo.svg",
+        apple: "/logo.svg",
+    },
 };
 
 export default function RootLayout({
@@ -24,13 +28,6 @@ export default function RootLayout({
                     fontFamily: '"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif',
                 }}
             >
-                <Script
-                    id="theme-script"
-                    strategy="beforeInteractive"
-                    dangerouslySetInnerHTML={{
-                        __html: `try{var s=JSON.parse(localStorage.getItem("aivro:theme_store")||"{}");var t=s.state&&s.state.theme==="light"?"light":"dark";document.documentElement.classList.toggle("dark",t==="dark");document.documentElement.style.colorScheme=t}catch(e){}`,
-                    }}
-                />
                 <AntdRegistry>
                     <AppProviders>{children}</AppProviders>
                 </AntdRegistry>

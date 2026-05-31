@@ -113,6 +113,9 @@ func CreateWorkflow(userID string, input SaveWorkflowInput) (model.Workflow, err
 		if err := tx.Create(&workflow).Error; err != nil {
 			return err
 		}
+		if err := bindWorkflowCloudFilesTx(tx, userID, workflow.ID, workflow.Nodes, workflow.ChatSessions); err != nil {
+			return err
+		}
 		return createEntitlementLogTx(tx, model.EntitlementLog{
 			ID:                         newID("entitle"),
 			UserID:                     user.ID,
@@ -147,6 +150,9 @@ func UpdateWorkflow(userID string, id string, input SaveWorkflowInput) (model.Wo
 	if tx.RowsAffected == 0 {
 		return workflow, safeMessageError{message: "工作流不存在或无权限访问"}
 	}
+	if err := bindWorkflowCloudFiles(userID, id, workflow.Nodes, workflow.ChatSessions); err != nil {
+		return workflow, err
+	}
 	return GetWorkflow(userID, id)
 }
 
@@ -165,7 +171,7 @@ func DeleteWorkflow(userID string, id string) error {
 	if tx.RowsAffected == 0 {
 		return safeMessageError{message: "工作流不存在或无权限访问"}
 	}
-	return nil
+	return DeleteWorkflowCloudFiles(userID, id)
 }
 
 func ShareWorkflow(r *http.Request, userID string, workflowID string, input ShareWorkflowInput) (map[string]any, error) {
@@ -425,14 +431,7 @@ func createEntitlementLogTx(tx *gorm.DB, log model.EntitlementLog) error {
 }
 
 func validateWorkflowCloudFilesTx(tx *gorm.DB, userID string, chunks ...json.RawMessage) error {
-	ids := map[string]bool{}
-	for _, chunk := range chunks {
-		var value any
-		if len(chunk) == 0 || json.Unmarshal(chunk, &value) != nil {
-			continue
-		}
-		collectCloudFileIDs(value, ids)
-	}
+	ids := collectCloudFileIDsFromChunks(chunks...)
 	for id := range ids {
 		var total int64
 		if err := tx.Model(&model.CloudFile{}).Where("id = ? AND user_id = ?", id, userID).Count(&total).Error; err != nil {
@@ -443,6 +442,40 @@ func validateWorkflowCloudFilesTx(tx *gorm.DB, userID string, chunks ...json.Raw
 		}
 	}
 	return nil
+}
+
+func bindWorkflowCloudFiles(userID string, workflowID string, chunks ...json.RawMessage) error {
+	db, err := repository.DB()
+	if err != nil {
+		return err
+	}
+	return bindWorkflowCloudFilesTx(db, userID, workflowID, chunks...)
+}
+
+func bindWorkflowCloudFilesTx(tx *gorm.DB, userID string, workflowID string, chunks ...json.RawMessage) error {
+	ids := collectCloudFileIDsFromChunks(chunks...)
+	if len(ids) == 0 {
+		return nil
+	}
+	return tx.Model(&model.CloudFile{}).Where("id IN ? AND user_id = ? AND deleted_at = ?", mapKeys(ids), userID, "").Updates(map[string]any{
+		"purpose":     model.CloudFilePurposeWorkflow,
+		"workflow_id": workflowID,
+		"history_id":  "",
+		"expires_at":  "",
+		"updated_at":  now(),
+	}).Error
+}
+
+func collectCloudFileIDsFromChunks(chunks ...json.RawMessage) map[string]bool {
+	ids := map[string]bool{}
+	for _, chunk := range chunks {
+		var value any
+		if len(chunk) == 0 || json.Unmarshal(chunk, &value) != nil {
+			continue
+		}
+		collectCloudFileIDs(value, ids)
+	}
+	return ids
 }
 
 func collectCloudFileIDs(value any, ids map[string]bool) {
@@ -465,6 +498,16 @@ func collectCloudFileIDs(value any, ids map[string]bool) {
 			collectCloudFileIDs(item, ids)
 		}
 	}
+}
+
+func mapKeys(items map[string]bool) []string {
+	result := make([]string, 0, len(items))
+	for key := range items {
+		if key != "" {
+			result = append(result, key)
+		}
+	}
+	return result
 }
 
 func pushLinkedShareUpdates(db *gorm.DB, share model.WorkflowShare) error {

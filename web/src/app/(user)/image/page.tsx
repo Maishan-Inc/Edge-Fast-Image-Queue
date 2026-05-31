@@ -620,6 +620,7 @@ function LogPanel({
             <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                     <h2 className="text-base font-semibold">生成记录</h2>
+                    <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">Free 用户生成记录最多保存 7 天</p>
                 </div>
                 <Tag className="m-0">{logs.length}</Tag>
             </div>
@@ -664,9 +665,9 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                     <div className="min-w-0">
                         <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
                         {log.thumbnails?.length ? (
-                            <div className="mt-2 flex gap-1 overflow-hidden">
+                            <div className="mt-2 grid grid-cols-4 gap-1.5">
                                 {log.thumbnails.slice(0, 4).map((image, index) => (
-                                    <img key={`${log.id}-${index}`} src={image} alt="" className="size-8 shrink-0 rounded-md object-cover" />
+                                    <img key={`${log.id}-${index}`} src={image} alt="" className="aspect-square min-w-0 rounded-md object-cover" />
                                 ))}
                             </div>
                         ) : null}

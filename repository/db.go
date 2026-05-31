@@ -111,6 +111,7 @@ func DatabaseStatus() (model.DatabaseStatus, error) {
 func migrateModels(db *gorm.DB) error {
 	err := db.AutoMigrate(
 		&model.User{},
+		&model.UserPreference{},
 		&model.EmailVerification{},
 		&model.CreditLog{},
 		&model.Prompt{},
@@ -151,6 +152,7 @@ func databaseMigrationModelItems() []struct {
 		value any
 	}{
 		{"model.User", &model.User{}},
+		{"model.UserPreference", &model.UserPreference{}},
 		{"model.EmailVerification", &model.EmailVerification{}},
 		{"model.CreditLog", &model.CreditLog{}},
 		{"model.Prompt", &model.Prompt{}},

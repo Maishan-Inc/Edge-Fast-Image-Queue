@@ -1,19 +1,22 @@
+"use client";
+
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+
+import { saveUserPreference } from "@/services/api/preferences";
+import { useUserStore } from "@/stores/use-user-store";
 
 export type ThemeName = "light" | "dark";
 
 type ThemeStore = {
     theme: ThemeName;
-    setTheme: (theme: ThemeName) => void;
+    setTheme: (theme: ThemeName, sync?: boolean) => void;
 };
 
-export const useThemeStore = create<ThemeStore>()(
-    persist(
-        (set) => ({
-            theme: "dark",
-            setTheme: (theme) => set({ theme }),
-        }),
-        { name: "aivro:theme_store" },
-    ),
-);
+export const useThemeStore = create<ThemeStore>()((set) => ({
+    theme: "dark",
+    setTheme: (theme, sync = true) => {
+        set({ theme });
+        const token = useUserStore.getState().token;
+        if (sync && token) void saveUserPreference(token, { theme });
+    },
+}));

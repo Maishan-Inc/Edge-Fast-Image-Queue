@@ -54,6 +54,19 @@ func DeleteGenerationHistories(ids []string) error {
 	return db.Where("id IN ?", ids).Delete(&model.GenerationHistory{}).Error
 }
 
+func ListExpiredGenerationHistories(now string, limit int) ([]model.GenerationHistory, error) {
+	db, err := DB()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	items := []model.GenerationHistory{}
+	err = db.Where("expires_at != ? AND expires_at <= ?", "", now).Order("expires_at asc").Limit(limit).Find(&items).Error
+	return items, err
+}
+
 func ListCloudFilesByIDs(ids []string) ([]model.CloudFile, error) {
 	db, err := DB()
 	if err != nil {

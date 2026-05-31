@@ -2,10 +2,11 @@
 
 import { useMemo } from "react";
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 
 import { apiGet } from "@/services/api/request";
+import { saveUserPreference } from "@/services/api/preferences";
 import type { AdminPublicSettings } from "@/services/api/admin";
+import { useUserStore } from "@/stores/use-user-store";
 
 export type AiConfig = {
     model: string;
@@ -20,8 +21,6 @@ export type AiConfig = {
     size: string;
     count: string;
 };
-
-export const CONFIG_STORE_KEY = "aivro:ai_config_store";
 
 export const defaultConfig: AiConfig = {
     model: "gpt-image-2",
@@ -41,7 +40,8 @@ type ConfigStore = {
     config: AiConfig;
     publicSettings: AdminPublicSettings | null;
     isPublicSettingsLoading: boolean;
-    updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+    updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K], sync?: boolean) => void;
+    setConfig: (config: Partial<AiConfig>, sync?: boolean) => void;
     loadPublicSettings: () => Promise<void>;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
 };
@@ -88,39 +88,38 @@ function normalizeStoredConfig(value: Partial<AiConfig> = {}): AiConfig {
     };
 }
 
-export const useConfigStore = create<ConfigStore>()(
-    persist(
-        (set, get) => ({
-            config: defaultConfig,
-            publicSettings: null,
-            isPublicSettingsLoading: false,
-            updateConfig: (key, value) =>
-                set((state) => ({
-                    config: {
-                        ...state.config,
-                        [key]: value,
-                    },
-                })),
-            loadPublicSettings: async () => {
-                if (get().isPublicSettingsLoading) return;
-                set({ isPublicSettingsLoading: true });
-                try {
-                    set({ publicSettings: await apiGet<AdminPublicSettings>("/api/settings") });
-                } finally {
-                    set({ isPublicSettingsLoading: false });
-                }
-            },
-            isAiConfigReady: (config, model) => isAiConfigReady(config, model),
+function syncPreference(config: AiConfig) {
+    const token = useUserStore.getState().token;
+    if (token) void saveUserPreference(token, { config });
+}
+
+export const useConfigStore = create<ConfigStore>()((set, get) => ({
+    config: defaultConfig,
+    publicSettings: null,
+    isPublicSettingsLoading: false,
+    updateConfig: (key, value, sync = true) =>
+        set((state) => {
+            const config = { ...state.config, [key]: value };
+            if (sync) syncPreference(config);
+            return { config };
         }),
-        {
-            name: CONFIG_STORE_KEY,
-            partialize: (state) => ({ config: state.config }),
-            merge: (persisted, current) => {
-                return { ...current, config: normalizeStoredConfig((persisted as Partial<ConfigStore>).config || {}) };
-            },
-        },
-    ),
-);
+    setConfig: (patch, sync = true) =>
+        set((state) => {
+            const config = normalizeStoredConfig({ ...state.config, ...patch });
+            if (sync) syncPreference(config);
+            return { config };
+        }),
+    loadPublicSettings: async () => {
+        if (get().isPublicSettingsLoading) return;
+        set({ isPublicSettingsLoading: true });
+        try {
+            set({ publicSettings: await apiGet<AdminPublicSettings>("/api/settings") });
+        } finally {
+            set({ isPublicSettingsLoading: false });
+        }
+    },
+    isAiConfigReady: (config, model) => isAiConfigReady(config, model),
+}));
 
 export function useEffectiveConfig() {
     const config = useConfigStore((state) => state.config);

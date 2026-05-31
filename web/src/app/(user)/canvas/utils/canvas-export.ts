@@ -13,7 +13,7 @@ export async function exportCanvasProjects(projects: CanvasProject[], fileName =
             const files: CanvasExportAsset[] = [];
             await Promise.all(
                 collectStorageKeys(project).map(async (storageKey) => {
-                    const blob = storageKey.startsWith("image:") ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
+                    const blob = (await getImageBlob(storageKey)) || (await getMediaBlob(storageKey));
                     if (!blob) return;
                     const path = `projects/${project.id}/files/${safeFileName(storageKey)}.${fileExtension(blob.type, storageKey)}`;
                     files.push({ storageKey, path, mimeType: blob.type || "application/octet-stream", bytes: blob.size });

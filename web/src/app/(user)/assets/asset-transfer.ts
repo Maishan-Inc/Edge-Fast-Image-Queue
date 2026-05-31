@@ -1,8 +1,8 @@
 import { saveAs } from "file-saver";
 
 import { createZip, readZip } from "@/lib/zip";
-import { getMediaBlob, setMediaBlob } from "@/services/file-storage";
-import { getImageBlob, setImageBlob } from "@/services/image-storage";
+import { getMediaBlob, uploadMediaFile } from "@/services/file-storage";
+import { getImageBlob, uploadImage } from "@/services/image-storage";
 import type { Asset } from "@/stores/use-asset-store";
 
 type AssetExportFile = {
@@ -28,7 +28,8 @@ export async function exportAssets(assets: Asset[]) {
         assets.map(async (asset) => {
             const storageKey = asset.kind === "image" || asset.kind === "video" ? asset.data.storageKey : undefined;
             if (!storageKey) return;
-            const blob = asset.kind === "image" ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
+            const fallback = asset.kind === "image" ? asset.data.dataUrl : asset.data.url;
+            const blob = asset.kind === "image" ? await getImageBlob(storageKey, fallback) : await getMediaBlob(storageKey, fallback);
             if (!blob) return;
             const path = `files/${safeFileName(storageKey)}.${fileExtension(blob.type, asset.kind)}`;
             files.push({ storageKey, path, mimeType: blob.type || asset.data.mimeType, bytes: blob.size });
@@ -46,15 +47,39 @@ export async function readAssetPackage(file: File) {
     const assetFile = zip.get("assets.json");
     if (!assetFile) throw new Error("missing assets.json");
     const data = JSON.parse(await assetFile.text()) as AssetExportFile;
+    const uploadedFiles = new Map<string, { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number }>();
     await Promise.all(
         data.files.map(async (item) => {
             const blob = zip.get(item.path);
             if (!blob) return;
             const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-            await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
+            const uploaded = item.mimeType.startsWith("image/") ? await uploadImage(typedBlob) : await uploadMediaFile(typedBlob);
+            uploadedFiles.set(item.storageKey, uploaded);
         }),
     );
-    return data.assets;
+    return data.assets.map((asset) => {
+        if (asset.kind === "image" && asset.data.storageKey) {
+            const uploaded = uploadedFiles.get(asset.data.storageKey);
+            if (!uploaded) return asset;
+            const coverUrl = asset.coverUrl === asset.data.dataUrl || asset.coverUrl === asset.data.storageKey || asset.coverUrl.includes(encodeURIComponent(asset.data.storageKey.replace(/^cloud:/, ""))) ? uploaded.url : asset.coverUrl;
+            return {
+                ...asset,
+                coverUrl,
+                data: { ...asset.data, dataUrl: uploaded.url, storageKey: uploaded.storageKey, width: uploaded.width || asset.data.width, height: uploaded.height || asset.data.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType },
+            };
+        }
+        if (asset.kind === "video" && asset.data.storageKey) {
+            const uploaded = uploadedFiles.get(asset.data.storageKey);
+            if (!uploaded) return asset;
+            const coverUrl = asset.coverUrl === asset.data.url || asset.coverUrl === asset.data.storageKey || asset.coverUrl.includes(encodeURIComponent(asset.data.storageKey.replace(/^cloud:/, ""))) ? uploaded.url : asset.coverUrl;
+            return {
+                ...asset,
+                coverUrl,
+                data: { ...asset.data, url: uploaded.url, storageKey: uploaded.storageKey, width: uploaded.width || asset.data.width, height: uploaded.height || asset.data.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType },
+            };
+        }
+        return asset;
+    });
 }
 
 function safeFileName(value: string) {

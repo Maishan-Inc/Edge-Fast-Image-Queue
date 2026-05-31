@@ -68,6 +68,14 @@ type AuthSession struct {
 	User  AuthUser `json:"user"`
 }
 
+// UserPreference 保存用户界面与生成参数偏好。
+type UserPreference struct {
+	UserID    string         `json:"userId" gorm:"primaryKey"`
+	Value     map[string]any `json:"value" gorm:"serializer:json"`
+	CreatedAt string         `json:"createdAt"`
+	UpdatedAt string         `json:"updatedAt"`
+}
+
 func PublicUser(user User) AuthUser {
 	return AuthUser{
 		ID:                    user.ID,

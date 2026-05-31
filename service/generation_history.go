@@ -21,7 +21,7 @@ type GenerationHistoryInput struct {
 }
 
 func SaveGenerationHistory(user model.AuthUser, input GenerationHistoryInput) (model.GenerationHistory, error) {
-	media, expiresAt, err := normalizeGenerationHistoryMedia(input.Media)
+	media, expiresAt, err := normalizeGenerationHistoryMedia(user.ID, input.Media)
 	if err != nil {
 		return model.GenerationHistory{}, err
 	}
@@ -42,6 +42,9 @@ func SaveGenerationHistory(user model.AuthUser, input GenerationHistoryInput) (m
 	if status == "" {
 		status = "成功"
 	}
+	if expiresAt == "" {
+		expiresAt = defaultTempExpiresAt()
+	}
 	item := model.GenerationHistory{
 		ID:         newID("history"),
 		UserID:     user.ID,
@@ -59,7 +62,15 @@ func SaveGenerationHistory(user model.AuthUser, input GenerationHistoryInput) (m
 		CreatedAt:  now(),
 		UpdatedAt:  now(),
 	}
-	return repository.SaveGenerationHistory(item)
+	saved, err := repository.SaveGenerationHistory(item)
+	if err != nil {
+		return saved, err
+	}
+	ids := generationHistoryFileIDs(saved.Media, saved.References)
+	if err := BindCloudFiles(user.ID, ids, model.CloudFilePurposeGeneration, "", saved.ID, saved.ExpiresAt); err != nil {
+		return saved, err
+	}
+	return saved, nil
 }
 
 func ListGenerationHistories(user model.AuthUser, historyType model.GenerationHistoryType, query model.Query) (model.GenerationHistoryList, error) {
@@ -71,6 +82,9 @@ func ListGenerationHistories(user model.AuthUser, historyType model.GenerationHi
 }
 
 func DeleteGenerationHistory(user model.AuthUser, id string) error {
+	if err := DeleteHistoryCloudFiles(user.ID, id); err != nil {
+		return err
+	}
 	return repository.DeleteGenerationHistory(user.ID, id)
 }
 
@@ -78,9 +92,10 @@ func pruneEmptyGenerationHistories(list model.GenerationHistoryList) (model.Gene
 	result := make([]model.GenerationHistory, 0, len(list.Items))
 	deleteIDs := []string{}
 	for _, item := range list.Items {
-		media, _, err := normalizeGenerationHistoryMedia(item.Media)
+		media, _, err := normalizeGenerationHistoryMedia(item.UserID, item.Media)
 		if err != nil || len(media) == 0 {
 			deleteIDs = append(deleteIDs, item.ID)
+			_ = DeleteHistoryCloudFiles(item.UserID, item.ID)
 			continue
 		}
 		item.Media = media
@@ -97,7 +112,7 @@ func pruneEmptyGenerationHistories(list model.GenerationHistoryList) (model.Gene
 	return list, nil
 }
 
-func normalizeGenerationHistoryMedia(media []model.GenerationHistoryMedia) ([]model.GenerationHistoryMedia, string, error) {
+func normalizeGenerationHistoryMedia(userID string, media []model.GenerationHistoryMedia) ([]model.GenerationHistoryMedia, string, error) {
 	ids := make([]string, 0, len(media))
 	for _, item := range media {
 		id := strings.TrimPrefix(strings.TrimSpace(item.CloudFileID), "cloud:")
@@ -114,7 +129,7 @@ func normalizeGenerationHistoryMedia(media []model.GenerationHistoryMedia) ([]mo
 	}
 	fileByID := map[string]model.CloudFile{}
 	for _, file := range files {
-		if file.DeletedAt == "" {
+		if file.DeletedAt == "" && file.UserID == userID {
 			fileByID[file.ID] = file
 		}
 	}
@@ -143,6 +158,48 @@ func normalizeGenerationHistoryMedia(media []model.GenerationHistoryMedia) ([]mo
 		result = append(result, item)
 	}
 	return result, expiresAt, nil
+}
+
+func CleanupExpiredGenerationHistories() error {
+	items, err := repository.ListExpiredGenerationHistories(now(), 100)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := DeleteHistoryCloudFiles(item.UserID, item.ID); err != nil {
+			return err
+		}
+		if err := repository.DeleteGenerationHistory(item.UserID, item.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func generationHistoryFileIDs(media []model.GenerationHistoryMedia, refs []model.GenerationHistoryReference) []string {
+	ids := make([]string, 0, len(media)+len(refs))
+	for _, item := range media {
+		if id := cloudID(item.CloudFileID, item.StorageKey); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	for _, item := range refs {
+		if id := cloudID("", item.StorageKey); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return uniqueStrings(ids)
+}
+
+func cloudID(id string, storageKey string) string {
+	id = strings.TrimPrefix(strings.TrimSpace(id), "cloud:")
+	if id != "" {
+		return id
+	}
+	if strings.HasPrefix(storageKey, "cloud:") {
+		return strings.TrimPrefix(storageKey, "cloud:")
+	}
+	return ""
 }
 
 func uniqueStrings(items []string) []string {

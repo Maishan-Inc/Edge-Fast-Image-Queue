@@ -31,7 +31,11 @@ func New() *gin.Engine {
 	})
 	api.GET("/auth/me", middleware.OptionalAuth, gin.WrapF(handler.CurrentUser))
 	api.GET("/settings", gin.WrapF(handler.Settings))
+	api.GET("/files/:id/content", middleware.OptionalAuth, func(c *gin.Context) {
+		handler.FileContent(c.Writer, c.Request, c.Param("id"))
+	})
 	v1 := api.Group("/v1", middleware.UserAuth)
+	v1.POST("/files", gin.WrapF(handler.UploadFile))
 	v1.POST("/images/generations", gin.WrapF(handler.AIImagesGenerations))
 	v1.POST("/images/edits", gin.WrapF(handler.AIImagesEdits))
 	v1.POST("/chat/completions", gin.WrapF(handler.AIChatCompletions))
@@ -47,6 +51,8 @@ func New() *gin.Engine {
 	v1.DELETE("/generation-histories/:id", func(c *gin.Context) {
 		handler.DeleteGenerationHistory(c.Writer, c.Request, c.Param("id"))
 	})
+	v1.GET("/preferences", gin.WrapF(handler.UserPreference))
+	v1.POST("/preferences", gin.WrapF(handler.SaveUserPreference))
 	v1.GET("/workflows", gin.WrapF(handler.Workflows))
 	v1.POST("/workflows", gin.WrapF(handler.CreateWorkflow))
 	v1.GET("/workflows/:id", func(c *gin.Context) {

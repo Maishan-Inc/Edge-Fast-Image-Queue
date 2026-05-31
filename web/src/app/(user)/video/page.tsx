@@ -503,7 +503,10 @@ function LogPanel({
     return (
         <>
             <div className="mb-3 flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold">生成记录</h2>
+                <div>
+                    <h2 className="text-base font-semibold">生成记录</h2>
+                    <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">Free 用户生成记录最多保存 7 天</p>
+                </div>
                 <Tag className="m-0">{logs.length}</Tag>
             </div>
             <div className="mb-4 flex flex-wrap gap-2">
@@ -534,6 +537,9 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                 <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
                 <div className="min-w-0">
                     <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
+                    {log.video?.url ? (
+                        <video src={log.video.url} className="mt-2 aspect-video w-full rounded-md bg-stone-100 object-cover dark:bg-stone-900" muted playsInline preload="metadata" />
+                    ) : null}
                     <div className="mt-2 flex flex-wrap gap-1">
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.size}</Tag>
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.resolution}p</Tag>
