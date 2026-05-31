@@ -26,10 +26,10 @@ export async function exportAssets(assets: Asset[]) {
 
     await Promise.all(
         assets.map(async (asset) => {
-            const storageKey = asset.kind === "image" || asset.kind === "video" ? asset.data.storageKey : undefined;
+            if (asset.kind !== "image" && asset.kind !== "video") return;
+            const storageKey = asset.data.storageKey;
             if (!storageKey) return;
-            const fallback = asset.kind === "image" ? asset.data.dataUrl : asset.data.url;
-            const blob = asset.kind === "image" ? await getImageBlob(storageKey, fallback) : await getMediaBlob(storageKey, fallback);
+            const blob = asset.kind === "image" ? await getImageBlob(storageKey, asset.data.dataUrl) : await getMediaBlob(storageKey, asset.data.url);
             if (!blob) return;
             const path = `files/${safeFileName(storageKey)}.${fileExtension(blob.type, asset.kind)}`;
             files.push({ storageKey, path, mimeType: blob.type || asset.data.mimeType, bytes: blob.size });

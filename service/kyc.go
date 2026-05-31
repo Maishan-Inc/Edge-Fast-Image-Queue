@@ -133,7 +133,6 @@ func HandleDiditWebhook(r *http.Request) error {
 		return err
 	}
 	sessionID := firstNonEmpty(anyString(payload["session_id"]), anyString(payload["id"]), anyString(payload["verification_id"]))
-	userID := firstNonEmpty(anyString(payload["vendor_data"]), anyString(payload["user_id"]))
 	status := normalizeKYCStatus(firstNonEmpty(anyString(payload["status"]), anyString(payload["decision"]), anyString(payload["verification_status"])))
 	if sessionID == "" {
 		return nil
